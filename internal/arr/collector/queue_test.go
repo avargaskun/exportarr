@@ -35,22 +35,6 @@ func TestQueueCollect(t *testing.T) {
 			},
 			path: "/api/v3/queue",
 		},
-		{
-			name: "lidarr",
-			config: &config.ArrConfig{
-				App:        "lidarr",
-				ApiVersion: "v1",
-			},
-			path: "/api/v1/queue",
-		},
-		{
-			name: "readarr",
-			config: &config.ArrConfig{
-				App:        "readarr",
-				ApiVersion: "v1",
-			},
-			path: "/api/v1/queue",
-		},
 	}
 
 	for _, tt := range tests {

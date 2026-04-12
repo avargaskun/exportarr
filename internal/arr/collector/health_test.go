@@ -35,22 +35,6 @@ func TestSystemHealthCollect(t *testing.T) {
 			},
 			path: "/api/v3/health",
 		},
-		{
-			name: "lidarr",
-			config: &config.ArrConfig{
-				App:        "lidarr",
-				ApiVersion: "v1",
-			},
-			path: "/api/v1/health",
-		},
-		{
-			name: "readarr",
-			config: &config.ArrConfig{
-				App:        "readarr",
-				ApiVersion: "v1",
-			},
-			path: "/api/v1/health",
-		},
 	}
 
 	for _, tt := range tests {

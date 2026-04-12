@@ -35,22 +35,6 @@ func TestRootFolderCollect(t *testing.T) {
 			},
 			path: "/api/v3/rootfolder",
 		},
-		{
-			name: "lidarr",
-			config: &config.ArrConfig{
-				App:        "lidarr",
-				ApiVersion: "v1",
-			},
-			path: "/api/v1/rootfolder",
-		},
-		{
-			name: "readarr",
-			config: &config.ArrConfig{
-				App:        "readarr",
-				ApiVersion: "v1",
-			},
-			path: "/api/v1/rootfolder",
-		},
 	}
 
 	for _, tt := range tests {

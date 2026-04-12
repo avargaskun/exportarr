@@ -43,7 +43,6 @@ type ArrConfig struct {
 	ApiKey                  string         `koanf:"api-key" validate:"required|regex:(^[a-zA-Z0-9]{20,32}$)"` // stores the API key
 	DisableSSLVerify        bool           `koanf:"disable-ssl-verify"`                                       // stores the disable SSL verify flag
 	Prowlarr                ProwlarrConfig `koanf:"prowlarr"`
-	Bazarr                  BazarrConfig   `koanf:"bazarr"`
 	k                       *koanf.Koanf
 }
 

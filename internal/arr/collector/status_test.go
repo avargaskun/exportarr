@@ -35,22 +35,6 @@ func TestStatusCollect(t *testing.T) {
 			},
 			path: "/api/v3/system/status",
 		},
-		{
-			name: "lidarr",
-			config: &config.ArrConfig{
-				App:        "lidarr",
-				ApiVersion: "v1",
-			},
-			path: "/api/v1/system/status",
-		},
-		{
-			name: "readarr",
-			config: &config.ArrConfig{
-				App:        "readarr",
-				ApiVersion: "v1",
-			},
-			path: "/api/v1/system/status",
-		},
 	}
 
 	for _, tt := range tests {

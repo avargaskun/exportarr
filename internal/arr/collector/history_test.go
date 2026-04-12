@@ -35,22 +35,6 @@ func TestHistoryCollect(t *testing.T) {
 			},
 			path: "/api/v3/history",
 		},
-		{
-			name: "lidarr",
-			config: &config.ArrConfig{
-				App:        "lidarr",
-				ApiVersion: "v1",
-			},
-			path: "/api/v1/history",
-		},
-		{
-			name: "readarr",
-			config: &config.ArrConfig{
-				App:        "readarr",
-				ApiVersion: "v1",
-			},
-			path: "/api/v1/history",
-		},
 	}
 
 	for _, tt := range tests {

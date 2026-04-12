@@ -23,20 +23,8 @@ func TestBackwardsCompatibility(t *testing.T) {
 			flags: sonarrCmd.PersistentFlags(),
 		},
 		{
-			name:  "lidarr",
-			flags: lidarrCmd.PersistentFlags(),
-		},
-		{
-			name:  "readarr",
-			flags: readarrCmd.PersistentFlags(),
-		},
-		{
 			name:  "prowlarr",
 			flags: prowlarrCmd.PersistentFlags(),
-		},
-		{
-			name:  "bazarr",
-			flags: bazarrCmd.PersistentFlags(),
 		},
 	}
 	for _, p := range params {

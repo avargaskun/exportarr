@@ -14,19 +14,12 @@ import (
 func init() {
 	config.RegisterArrFlags(radarrCmd.PersistentFlags())
 	config.RegisterArrFlags(sonarrCmd.PersistentFlags())
-	config.RegisterArrFlags(lidarrCmd.PersistentFlags())
-	config.RegisterArrFlags(readarrCmd.PersistentFlags())
 	config.RegisterArrFlags(prowlarrCmd.PersistentFlags())
-	config.RegisterArrFlags(bazarrCmd.PersistentFlags())
 	config.RegisterProwlarrFlags(prowlarrCmd.PersistentFlags())
-	config.RegisterBazarrFlags(bazarrCmd.PersistentFlags())
 
 	rootCmd.AddCommand(
 		radarrCmd,
 		sonarrCmd,
-		lidarrCmd,
-		readarrCmd,
-		bazarrCmd,
 		prowlarrCmd,
 	)
 }
@@ -95,84 +88,6 @@ var sonarrCmd = &cobra.Command{
 	},
 }
 
-var lidarrCmd = &cobra.Command{
-	Use:   "lidarr",
-	Short: "Prometheus Exporter for Lidarr",
-	Long:  "Prometheus Exporter for Lidarr.",
-	RunE: func(cmd *cobra.Command, args []string) error {
-		c, err := config.LoadArrConfig(*conf, cmd.PersistentFlags())
-		if err != nil {
-			return err
-		}
-		c.ApiVersion = "v1"
-		UsageOnError(cmd, c.Validate())
-
-		serveHttp(func(r prometheus.Registerer) {
-			r.MustRegister(
-				collector.NewLidarrCollector(c),
-				collector.NewQueueCollector(c),
-				collector.NewHistoryCollector(c),
-				collector.NewRootFolderCollector(c),
-				collector.NewSystemStatusCollector(c),
-				collector.NewSystemHealthCollector(c),
-			)
-		})
-		return nil
-	},
-}
-
-var readarrCmd = &cobra.Command{
-	Use:     "readarr",
-	Aliases: []string{"b"},
-	Short:   "Prometheus Exporter for Readarr",
-	Long:    "Prometheus Exporter for Readarr.",
-	RunE: func(cmd *cobra.Command, args []string) error {
-		c, err := config.LoadArrConfig(*conf, cmd.PersistentFlags())
-		if err != nil {
-			return err
-		}
-		c.ApiVersion = "v1"
-		UsageOnError(cmd, c.Validate())
-
-		serveHttp(func(r prometheus.Registerer) {
-			r.MustRegister(
-				collector.NewReadarrCollector(c),
-				collector.NewQueueCollector(c),
-				collector.NewHistoryCollector(c),
-				collector.NewRootFolderCollector(c),
-				collector.NewSystemStatusCollector(c),
-				collector.NewSystemHealthCollector(c),
-			)
-		})
-		return nil
-	},
-}
-
-var bazarrCmd = &cobra.Command{
-	Use:     "bazarr",
-	Aliases: []string{"b"},
-	Short:   "Prometheus Exporter for Bazarr",
-	Long:    "Prometheus Exporter for Bazarr.",
-	RunE: func(cmd *cobra.Command, args []string) error {
-		c, err := config.LoadArrConfig(*conf, cmd.PersistentFlags())
-		if err != nil {
-			return err
-		}
-		c.ApiVersion = ""
-		if err := c.LoadBazarrConfig(cmd.PersistentFlags()); err != nil {
-			return err
-		}
-		UsageOnError(cmd, c.Validate())
-		UsageOnError(cmd, c.Bazarr.Validate())
-
-		serveHttp(func(r prometheus.Registerer) {
-			r.MustRegister(
-				collector.NewBazarrCollector(c),
-			)
-		})
-		return nil
-	},
-}
 
 var prowlarrCmd = &cobra.Command{
 	Use:     "prowlarr",
