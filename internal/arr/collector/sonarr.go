@@ -278,6 +278,10 @@ func (collector *sonarrCollector) Collect(ch chan<- prometheus.Metric) {
 			for _, q := range qualities {
 				if q.Quality.Name != "" {
 					qualityWeights[q.Quality.Name] = strconv.Itoa(q.Weight)
+					// Pre-populate zero values for all known qualities (#389)
+					if _, exists := episodesQualities[q.Quality.Name]; !exists {
+						episodesQualities[q.Quality.Name] = 0
+					}
 				}
 			}
 
@@ -292,25 +296,24 @@ func (collector *sonarrCollector) Collect(ch chan<- prometheus.Metric) {
 	}
 
 	episodesMissing := model.Missing{}
-
-	params := client.QueryParams{}
-	params.Add("sortKey", "airDateUtc")
-
-	if err := c.DoRequest("wanted/missing", &episodesMissing, params); err != nil {
-		log.Errorw("Error getting missing",
-			"error", err)
-		ch <- prometheus.NewInvalidMetric(collector.errorMetric, err)
-		return
-	}
-
 	episodesCutoffUnmet := model.CutoffUnmet{}
 
-	// Cutoff unmet endpoint uses the same params as missing
-	if err := c.DoRequest("wanted/cutoff", &episodesCutoffUnmet, params); err != nil {
-		log.Errorw("Error getting cutoff unmet",
-			"error", err)
-		ch <- prometheus.NewInvalidMetric(collector.errorMetric, err)
-		return
+	if !collector.config.DisableWanted {
+		if err := c.DoRequest("wanted/missing", &episodesMissing); err != nil {
+			log.Errorw("Error getting missing",
+				"error", err)
+			ch <- prometheus.NewInvalidMetric(collector.errorMetric, err)
+			return
+		}
+
+		if err := c.DoRequest("wanted/cutoff", &episodesCutoffUnmet); err != nil {
+			log.Errorw("Error getting cutoff unmet",
+				"error", err)
+			ch <- prometheus.NewInvalidMetric(collector.errorMetric, err)
+			return
+		}
+	} else {
+		log.Debugw("Wanted collection disabled, emitting zero values")
 	}
 
 	// Get tag details for series
@@ -345,12 +348,10 @@ func (collector *sonarrCollector) Collect(ch chan<- prometheus.Metric) {
 		ch <- prometheus.MustNewConstMetric(collector.episodeMonitoredMetric, prometheus.GaugeValue, float64(episodesMonitored))
 		ch <- prometheus.MustNewConstMetric(collector.episodeUnmonitoredMetric, prometheus.GaugeValue, float64(episodesUnmonitored))
 
-		if len(episodesQualities) > 0 {
-			for qualityName, count := range episodesQualities {
-				ch <- prometheus.MustNewConstMetric(collector.episodeQualitiesMetric, prometheus.GaugeValue, float64(count),
-					qualityName, qualityWeights[qualityName],
-				)
-			}
+		for qualityName, count := range episodesQualities {
+			ch <- prometheus.MustNewConstMetric(collector.episodeQualitiesMetric, prometheus.GaugeValue, float64(count),
+				qualityName, qualityWeights[qualityName],
+			)
 		}
 	}
 	log.Debugw("Sonarr cycle completed",

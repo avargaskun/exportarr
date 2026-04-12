@@ -24,6 +24,7 @@ func TestSonarrCollect(t *testing.T) {
 		name                  string
 		config                *config.ArrConfig
 		expected_metrics_file string
+		disallowedEndpoints   []string // endpoints that must NOT be called
 	}{
 		{
 			name: "basic",
@@ -42,12 +43,25 @@ func TestSonarrCollect(t *testing.T) {
 			},
 			expected_metrics_file: "expected_metrics_extended.txt",
 		},
+		{
+			name: "disable_wanted",
+			config: &config.ArrConfig{
+				App:            "sonarr",
+				ApiVersion:     "v3",
+				DisableWanted:  true,
+			},
+			expected_metrics_file: "expected_metrics_disable_wanted.txt",
+			disallowedEndpoints:   []string{"/api/v3/wanted/missing", "/api/v3/wanted/cutoff"},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			require := require.New(t)
 			ts, err := newTestSonarrServer(t, func(w http.ResponseWriter, r *http.Request) {
 				require.Contains(r.URL.Path, "/api/")
+				for _, ep := range tt.disallowedEndpoints {
+					require.NotEqual(ep, r.URL.Path, "endpoint %s should not be called when disabled", ep)
+				}
 			})
 			require.NoError(err)
 

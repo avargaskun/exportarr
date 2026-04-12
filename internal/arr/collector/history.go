@@ -40,6 +40,13 @@ func (collector *historyCollector) Describe(ch chan<- *prometheus.Desc) {
 
 func (collector *historyCollector) Collect(ch chan<- prometheus.Metric) {
 	log := zap.S().With("collector", "history")
+
+	if collector.config.DisableHistory {
+		log.Debugw("History collection disabled, emitting zero value")
+		ch <- prometheus.MustNewConstMetric(collector.historyMetric, prometheus.GaugeValue, 0)
+		return
+	}
+
 	c, err := client.NewClient(collector.config)
 	if err != nil {
 		log.Errorw("Error creating client",

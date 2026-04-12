@@ -68,6 +68,35 @@ func TestHistoryCollect(t *testing.T) {
 	}
 }
 
+func TestHistoryCollect_Disabled(t *testing.T) {
+	require := require.New(t)
+
+	// Server should never be called when history is disabled
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Fail("No HTTP requests should be made when history collection is disabled")
+	}))
+	defer ts.Close()
+
+	cfg := &config.ArrConfig{
+		App:            "sonarr",
+		ApiVersion:     "v3",
+		URL:            ts.URL,
+		ApiKey:         test_util.API_KEY,
+		DisableHistory: true,
+	}
+	collector := NewHistoryCollector(cfg)
+
+	expected := strings.NewReader(`# HELP sonarr_history_total Total number of item in the history
+# TYPE sonarr_history_total gauge
+sonarr_history_total{url="` + ts.URL + `"} 0
+`)
+
+	require.NotPanics(func() {
+		err := testutil.CollectAndCompare(collector, expected)
+		require.NoError(err)
+	})
+}
+
 func TestHistoryCollect_FailureDoesntPanic(t *testing.T) {
 	require := require.New(t)
 

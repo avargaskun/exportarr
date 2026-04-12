@@ -16,5 +16,11 @@
       "name": "Remux-2160p"
     },
     "weight": 15
+  },
+  {
+    "quality": {
+      "name": "WEBDL-720p"
+    },
+    "weight": 1
   }
 ]

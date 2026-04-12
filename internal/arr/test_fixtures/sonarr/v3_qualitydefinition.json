@@ -10,5 +10,11 @@
       "name": "WEBDL-1080p"
     },
     "weight": 10
+  },
+  {
+    "quality": {
+      "name": "HDTV-720p"
+    },
+    "weight": 1
   }
 ]

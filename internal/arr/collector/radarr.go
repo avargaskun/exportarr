@@ -207,18 +207,24 @@ func (collector *radarrCollector) Collect(ch chan<- prometheus.Metric) {
 	for _, q := range qualityDefs {
 		if q.Quality.Name != "" {
 			qualityWeights[q.Quality.Name] = strconv.Itoa(q.Weight)
+			// Pre-populate zero values for all known qualities (#389)
+			if _, exists := qualities[q.Quality.Name]; !exists {
+				qualities[q.Quality.Name] = 0
+			}
 		}
 	}
 
 	moviesCutoffUnmet := model.CutoffUnmetMovies{}
-	moviesCutoffUnmetParams := client.QueryParams{}
-	params.Add("sortKey", "airDateUtc")
 
-	if err := c.DoRequest("wanted/cutoff", &moviesCutoffUnmet, moviesCutoffUnmetParams); err != nil {
-		log.Errorw("Error getting cutoff unmet",
-			"error", err)
-		ch <- prometheus.NewInvalidMetric(collector.errorMetric, err)
-		return
+	if !collector.config.DisableWanted {
+		if err := c.DoRequest("wanted/cutoff", &moviesCutoffUnmet); err != nil {
+			log.Errorw("Error getting cutoff unmet",
+				"error", err)
+			ch <- prometheus.NewInvalidMetric(collector.errorMetric, err)
+			return
+		}
+	} else {
+		log.Debugw("Wanted collection disabled, emitting zero values")
 	}
 
 	ch <- prometheus.MustNewConstMetric(collector.movieEdition, prometheus.GaugeValue, float64(editions))
@@ -231,20 +237,16 @@ func (collector *radarrCollector) Collect(ch chan<- prometheus.Metric) {
 	ch <- prometheus.MustNewConstMetric(collector.movieCutoffUnmetMetric, prometheus.GaugeValue, float64(moviesCutoffUnmet.TotalRecords))
 	ch <- prometheus.MustNewConstMetric(collector.movieFileSizeMetric, prometheus.GaugeValue, float64(fileSize))
 
-	if len(qualities) > 0 {
-		for qualityName, count := range qualities {
-			ch <- prometheus.MustNewConstMetric(collector.movieQualitiesMetric, prometheus.GaugeValue, float64(count),
-				qualityName, qualityWeights[qualityName],
-			)
-		}
+	for qualityName, count := range qualities {
+		ch <- prometheus.MustNewConstMetric(collector.movieQualitiesMetric, prometheus.GaugeValue, float64(count),
+			qualityName, qualityWeights[qualityName],
+		)
 	}
 
-	if len(tags) > 0 {
-		for _, Tag := range tags {
-			ch <- prometheus.MustNewConstMetric(collector.movieTagsMetric, prometheus.GaugeValue, float64(Tag.Movies),
-				Tag.Label,
-			)
-		}
+	for _, Tag := range tags {
+		ch <- prometheus.MustNewConstMetric(collector.movieTagsMetric, prometheus.GaugeValue, float64(Tag.Movies),
+			Tag.Label,
+		)
 	}
 
 }
