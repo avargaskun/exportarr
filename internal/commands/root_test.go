@@ -204,3 +204,14 @@ func TestShellCompletionDisabled(t *testing.T) {
 	_, err := os.Stat(debugFile)
 	assert.True(t, os.IsNotExist(err), "BASH_COMP_DEBUG_FILE must not be written")
 }
+
+// expvar is linked in and registers /debug/vars on http.DefaultServeMux, which must never be served.
+func TestHandler_DoesNotServeDebugEndpoints(t *testing.T) {
+	ts := testServer(t, time.Minute)
+	for _, path := range []string{"/debug/vars", "/debug/pprof/"} {
+		_, body := get(t, http.MethodGet, ts.URL+path)
+		assert.NotContains(t, body, "memstats")
+		assert.NotContains(t, body, "cmdline")
+		assert.NotContains(t, body, "goroutine")
+	}
+}
