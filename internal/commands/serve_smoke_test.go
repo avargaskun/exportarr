@@ -87,6 +87,22 @@ func TestServe_Smoke(t *testing.T) {
 	assert.NotContains(t, logs, "level=ERROR")
 }
 
+func TestServe_ConfiguredTargetLogsRedactedURL(t *testing.T) {
+	sonarr := fixtures.NewFakeApp(t, fixtures.FakeAppOptions{App: "sonarr", APIKey: smokeKey})
+	// ValidateURL rejects userinfo and queries, so a fragment is what tells the redacted URL apart.
+	rc := startCommand(t, map[string]string{
+		"TARGET_0_NAME":    "sonarr-hd",
+		"TARGET_0_APP":     "sonarr",
+		"TARGET_0_URL":     sonarr.URL + "/base#fragment-marker",
+		"TARGET_0_API_KEY": smokeKey,
+	}, "serve")
+	rc.Stop()
+
+	logs := rc.Logs()
+	assert.Contains(t, logs, `msg="Configured target" target=sonarr-hd app=sonarr url=`+sonarr.URL+"/base\n")
+	assert.NotContains(t, logs, "fragment-marker")
+}
+
 func TestServe_FailsClosed(t *testing.T) {
 	sonarr := fixtures.NewFakeApp(t, fixtures.FakeAppOptions{App: "sonarr", APIKey: smokeKey})
 	validTarget := func(env map[string]string) map[string]string {

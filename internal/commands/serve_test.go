@@ -356,7 +356,9 @@ func assertNotFound(t *testing.T, code int, body string, header http.Header, pro
 	assert.Equal(t, code, http.StatusNotFound)
 	assert.Equal(t, body, notFoundBody)
 	assert.Equal(t, header.Get("Content-Type"), "text/plain; charset=utf-8")
-	assert.NotContains(t, body, probe)
+	if probe != "" {
+		assert.NotContains(t, body, probe)
+	}
 }
 
 func TestServeHandler_NotFound(t *testing.T) {
@@ -376,6 +378,8 @@ func TestServeHandler_NotFound(t *testing.T) {
 		{"delete a target", http.MethodDelete, "/metrics/radarr"},
 		{"other path", http.MethodGet, "/x"},
 		{"markup in the path", http.MethodGet, "/%3Cscript%3Ealert(1)%3C/script%3E"},
+		{"connect without a path", http.MethodConnect, ""},
+		{"connect to a target", http.MethodConnect, "/metrics/sonarr-hd"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

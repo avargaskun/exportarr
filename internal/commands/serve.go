@@ -100,7 +100,14 @@ func newServeHandler(ts []*target, self *prometheus.Registry) http.Handler {
 	mux.HandleFunc("GET /healthz", handlers.HealthzHandler)
 	mux.Handle("GET /{$}", handlers.TargetIndexHandler(names))
 	mux.HandleFunc("/", handlers.NotFoundHandler)
-	return handlers.LogHandler(handlers.RecoveryHandler(mux))
+	return handlers.LogHandler(handlers.RecoveryHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// The mux answers 405, not the catch-all, for a CONNECT whose path doesn't start with "/".
+		if !strings.HasPrefix(r.URL.Path, "/") && r.Method == http.MethodConnect {
+			handlers.NotFoundHandler(w, r)
+			return
+		}
+		mux.ServeHTTP(w, r)
+	})))
 }
 
 // appBuilder resolves a target into its app's collectors, limited by lim, and the URL they scrape.

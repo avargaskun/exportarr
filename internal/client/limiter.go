@@ -105,6 +105,7 @@ type slotLimiter struct {
 	timeouts prometheus.Counter
 }
 
+// Acquire implements Limiter.
 func (l *slotLimiter) Acquire(ctx context.Context) (func(), error) {
 	start := time.Now()
 	// Taking the reserved slot first leaves shared capacity to other targets.

@@ -211,7 +211,10 @@ func assertHealthyScrape(t *testing.T, tg e2eTarget, fake *fixtures.FakeApp, res
 	for _, m := range labels {
 		assert.Equal(t, m[1], fake.URL, "foreign url label in %s", tg.name)
 	}
+	assert.False(t, targetLabel.MatchString(res.body), "%s series carry a target label:\n%s", tg.name, res.body)
 }
+
+var targetLabel = regexp.MustCompile(`[{,]target="`)
 
 var versionedAPIPath = regexp.MustCompile(`^/api/v[0-9]+/`)
 
