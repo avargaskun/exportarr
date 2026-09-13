@@ -171,7 +171,9 @@ func (collector *bazarrCollector) Collect(ch chan<- prometheus.Metric) {
 		return
 	}
 	defer collector.collectMu.Unlock()
-	c := collector.client
+	ctx, cancel := collectContext(collector.config)
+	defer cancel()
+	c := collector.client.WithContext(ctx)
 	tseries := time.Now()
 
 	// Badges is one cheap call carrying the missing-episode count, throttled

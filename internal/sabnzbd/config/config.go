@@ -16,6 +16,7 @@ type SabnzbdConfig struct {
 	APIKey           string
 	DisableSSLVerify bool
 	RequestTimeout   time.Duration
+	CollectTimeout   time.Duration
 }
 
 // LoadSabnzbdConfig builds a SabnzbdConfig from the base configuration.
@@ -25,6 +26,7 @@ func LoadSabnzbdConfig(conf base_config.Config) (*SabnzbdConfig, error) {
 		APIKey:           conf.APIKey,
 		DisableSSLVerify: conf.DisableSSLVerify,
 		RequestTimeout:   conf.RequestTimeout,
+		CollectTimeout:   conf.CollectTimeout(),
 	}
 	return ret, nil
 }

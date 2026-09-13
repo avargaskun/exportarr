@@ -65,7 +65,9 @@ func (collector *radarrCollector) Describe(ch chan<- *prometheus.Desc) {
 func (collector *radarrCollector) Collect(ch chan<- prometheus.Metric) {
 	log := slog.With("collector", "radarr")
 	defer recoverCollect(log, ch, collector.errorMetric)
-	c := collector.client
+	ctx, cancel := collectContext(collector.config)
+	defer cancel()
+	c := collector.client.WithContext(ctx)
 	var fileSize int64
 	var (
 		editions    = 0

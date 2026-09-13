@@ -151,7 +151,9 @@ func (collector *prowlarrCollector) Collect(ch chan<- prometheus.Metric) {
 	total := time.Now()
 	log := slog.With("collector", "prowlarr")
 	defer recoverCollect(log, ch, collector.errorMetric)
-	c := collector.client
+	ctx, cancel := collectContext(collector.config)
+	defer cancel()
+	c := collector.client.WithContext(ctx)
 
 	enabledIndexers := 0
 

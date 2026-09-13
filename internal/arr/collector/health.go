@@ -46,7 +46,9 @@ func (collector *systemHealthCollector) Describe(ch chan<- *prometheus.Desc) {
 func (collector *systemHealthCollector) Collect(ch chan<- prometheus.Metric) {
 	log := slog.With("collector", "systemHealth")
 	defer recoverCollect(log, ch, collector.errorMetric)
-	c := collector.client
+	ctx, cancel := collectContext(collector.config)
+	defer cancel()
+	c := collector.client.WithContext(ctx)
 	systemHealth, err := client.Get[model.SystemHealth](c, "health")
 	if err != nil {
 		emitError(log, ch, collector.errorMetric, "Error getting health", "error", err)

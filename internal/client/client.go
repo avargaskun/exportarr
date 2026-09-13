@@ -30,6 +30,7 @@ type Client struct {
 	httpClient   http.Client
 	URL          url.URL
 	maxBodyBytes int64
+	ctx          context.Context
 }
 
 // QueryParams holds URL query parameters.
@@ -81,9 +82,22 @@ func (c *Client) unmarshalBody(b io.Reader, target any) (err error) {
 	return
 }
 
+// WithContext returns a shallow copy of c whose requests, when made without
+// an explicit context, are bound to ctx (like http.Request.WithContext). It
+// scopes one collection's requests to its deadline.
+func (c *Client) WithContext(ctx context.Context) *Client {
+	scoped := *c
+	scoped.ctx = ctx
+	return &scoped
+}
+
 // DoRequest - Take a HTTP Request and return Unmarshaled data
 func (c *Client) DoRequest(endpoint string, target any, queryParams ...QueryParams) error {
-	return c.DoRequestContext(context.Background(), endpoint, target, queryParams...)
+	ctx := c.ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return c.DoRequestContext(ctx, endpoint, target, queryParams...)
 }
 
 // DoRequestContext is DoRequest bound to ctx: cancelling ctx aborts the request.
@@ -121,7 +135,9 @@ func (c *Client) DoRequestContext(ctx context.Context, endpoint string, target a
 
 // Get fetches an endpoint and decodes the JSON response into T.
 func Get[T any](c *Client, endpoint string, queryParams ...QueryParams) (T, error) {
-	return GetContext[T](context.Background(), c, endpoint, queryParams...)
+	var out T
+	err := c.DoRequest(endpoint, &out, queryParams...)
+	return out, err
 }
 
 // GetContext is Get bound to ctx.

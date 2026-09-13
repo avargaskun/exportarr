@@ -34,7 +34,9 @@ func (collector *systemStatusCollector) Describe(ch chan<- *prometheus.Desc) {
 func (collector *systemStatusCollector) Collect(ch chan<- prometheus.Metric) {
 	log := slog.With("collector", "system_status")
 	defer recoverCollect(log, ch, collector.errorMetric)
-	c := collector.client
+	ctx, cancel := collectContext(collector.config)
+	defer cancel()
+	c := collector.client.WithContext(ctx)
 	systemStatus, err := client.Get[model.SystemStatus](c, "system/status")
 	if err != nil {
 		ch <- prometheus.MustNewConstMetric(collector.systemStatus, prometheus.GaugeValue, float64(0.0))

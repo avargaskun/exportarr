@@ -43,7 +43,9 @@ func (collector *queueCollector) Describe(ch chan<- *prometheus.Desc) {
 func (collector *queueCollector) Collect(ch chan<- prometheus.Metric) {
 	log := slog.With("collector", "queue")
 	defer recoverCollect(log, ch, collector.errorMetric)
-	c := collector.client
+	ctx, cancel := collectContext(collector.config)
+	defer cancel()
+	c := collector.client.WithContext(ctx)
 
 	params := client.QueryParams{}
 	params.Add("page", "1")
