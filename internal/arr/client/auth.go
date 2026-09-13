@@ -46,7 +46,7 @@ func transportOptions(config *config.ArrConfig) client.TransportOptions {
 	}
 }
 
-// NewAuth selects the authenticator (form, basic, or API key) for the config.
+// NewAuth selects the authenticator (form or API key) for the config.
 func NewAuth(config *config.ArrConfig) (client.Authenticator, error) {
 	var auth client.Authenticator
 
