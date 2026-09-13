@@ -24,6 +24,7 @@ func RegisterConfigFlags(flags *flag.FlagSet) {
 	flags.StringP("interface", "i", "", "IP address to listen on")
 	flags.IntP("port", "p", 0, "Port to listen on")
 	flags.Duration("request-timeout", 0, "HTTP timeout per request to the target app")
+	flags.Duration("scrape-timeout", 0, "Upper bound on one /metrics scrape; keep it at or below Prometheus's scrape_timeout")
 }
 
 // Config is the base configuration shared by every exportarr subcommand.
@@ -43,6 +44,18 @@ type Config struct {
 	Interface        string        `env:"INTERFACE" envDefault:"0.0.0.0"`
 	DisableSSLVerify bool          `env:"DISABLE_SSL_VERIFY"`
 	RequestTimeout   time.Duration `env:"REQUEST_TIMEOUT" envDefault:"60s"`
+	ScrapeTimeout    time.Duration `env:"SCRAPE_TIMEOUT" envDefault:"2m"`
+}
+
+// collectGrace is the part of the scrape budget reserved for serving
+// whatever the collectors gathered before their deadline.
+const collectGrace = 5 * time.Second
+
+// CollectTimeout is the deadline for a collector's upstream requests: the
+// scrape budget minus a grace period, so a slow collector still yields a
+// partial response instead of the scrape timing out as a whole.
+func (c *Config) CollectTimeout() time.Duration {
+	return max(c.ScrapeTimeout-collectGrace, c.ScrapeTimeout/2)
 }
 
 // OverlayFlag copies the value of an explicitly-set flag into dst, so flags
@@ -73,6 +86,7 @@ func LoadConfig(flags *flag.FlagSet) (*Config, error) {
 	OverlayFlag(flags, "port", flags.GetInt, &out.Port)
 	OverlayFlag(flags, "disable-ssl-verify", flags.GetBool, &out.DisableSSLVerify)
 	OverlayFlag(flags, "request-timeout", flags.GetDuration, &out.RequestTimeout)
+	OverlayFlag(flags, "scrape-timeout", flags.GetDuration, &out.ScrapeTimeout)
 
 	// A mounted secret wins over any inline API_KEY. Secrets commonly end
 	// with a newline, which the env library preserves: trim it.
@@ -94,6 +108,9 @@ func (c *Config) Validate() error {
 	}
 	if c.Port == 0 {
 		errs = append(errs, errors.New("port is required"))
+	}
+	if c.ScrapeTimeout <= 0 {
+		errs = append(errs, errors.New("scrape-timeout must be greater than zero"))
 	}
 	if net.ParseIP(c.Interface) == nil {
 		errs = append(errs, fmt.Errorf("interface must be a valid IP address: %q", c.Interface))

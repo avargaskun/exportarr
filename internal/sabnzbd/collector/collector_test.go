@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/onedr0p/exportarr/internal/sabnzbd/config"
 	"github.com/prometheus/client_golang/prometheus/testutil"
@@ -113,4 +114,22 @@ func TestCollect_FailureDoesntPanic(t *testing.T) {
 		assert.Error(t, err)
 	}, "Collecting metrics should not panic on failure")
 	assert.Error(t, err)
+}
+
+func TestCollect_StopsAtCollectTimeout(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		<-r.Context().Done()
+	}))
+	defer ts.Close()
+
+	collector, err := NewSabnzbdCollector(&config.SabnzbdConfig{
+		URL:            ts.URL,
+		APIKey:         testAPIKey,
+		CollectTimeout: 200 * time.Millisecond,
+	})
+	assert.NoError(t, err)
+
+	start := time.Now()
+	assert.Equal(t, testutil.CollectAndCount(collector, "sabnzbd_collector_error"), 1)
+	assert.True(t, time.Since(start) < 5*time.Second, "collection took %s", time.Since(start))
 }

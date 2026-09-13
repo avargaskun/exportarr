@@ -10,6 +10,14 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 )
 
+const (
+	queuePageSize = 250
+	// maxQueuePages and maxQueuePrealloc bound work driven by the response's
+	// own totalRecords/pageSize, which a broken or hostile target controls.
+	maxQueuePages    = 100
+	maxQueuePrealloc = 1000
+)
+
 type queueCollector struct {
 	client      *client.Client
 	config      *config.ArrConfig // App configuration
@@ -35,15 +43,13 @@ func (collector *queueCollector) Describe(ch chan<- *prometheus.Desc) {
 func (collector *queueCollector) Collect(ch chan<- prometheus.Metric) {
 	log := slog.With("collector", "queue")
 	defer recoverCollect(log, ch, collector.errorMetric)
-	c, err := client.NewClient(collector.config)
-	if err != nil {
-		emitError(log, ch, collector.errorMetric, "Error creating client", "error", err)
-		return
-	}
+	ctx, cancel := collectContext(collector.config)
+	defer cancel()
+	c := collector.client.WithContext(ctx)
 
 	params := client.QueryParams{}
 	params.Add("page", "1")
-	params.Add("pageSize", "250")
+	params.Add("pageSize", strconv.Itoa(queuePageSize))
 	if collector.config.EnableUnknownQueueItems {
 		switch collector.config.App {
 		case "sonarr":
@@ -58,24 +64,42 @@ func (collector *queueCollector) Collect(ch chan<- prometheus.Metric) {
 		emitError(log, ch, collector.errorMetric, "Error getting queue", "error", err)
 		return
 	}
-	// Calculate total pages, guarding against a zero page size in the response.
-	totalPages := 0
-	if queue.PageSize > 0 {
-		totalPages = (queue.TotalRecords + queue.PageSize - 1) / queue.PageSize
+	if queue.TotalRecords < 0 || queue.PageSize < 0 {
+		emitError(log, ch, collector.errorMetric, "Invalid queue pagination",
+			"totalRecords", queue.TotalRecords, "pageSize", queue.PageSize)
+		return
 	}
-	// Paginate
-	queueStatusAll := make([]model.QueueRecords, 0, queue.TotalRecords)
-	queueStatusAll = append(queueStatusAll, queue.Records...)
-	if totalPages > 1 {
-		for page := 2; page <= totalPages; page++ {
-			params.Set("page", strconv.Itoa(page))
-			queue, err = client.Get[model.Queue](c, "queue", params)
-			if err != nil {
-				emitError(log, ch, collector.errorMetric, "Error getting queue page", "page", page, "error", err)
-				return
-			}
-			queueStatusAll = append(queueStatusAll, queue.Records...)
+	// The page count comes from the response, so bound it; a zero page size
+	// means a single page.
+	totalPages := 1
+	if queue.PageSize > 0 {
+		totalPages = queue.TotalRecords / queue.PageSize
+		if queue.TotalRecords%queue.PageSize != 0 {
+			totalPages++
 		}
+	}
+	if totalPages > maxQueuePages {
+		log.Warn("Queue reports more pages than the exporter fetches; counting the first pages only",
+			"totalPages", totalPages, "maxPages", maxQueuePages)
+		totalPages = maxQueuePages
+	}
+	queueStatusAll := make([]model.QueueRecords, 0, min(queue.TotalRecords, maxQueuePrealloc))
+	queueStatusAll = append(queueStatusAll, queue.Records...)
+	prev := queue.Records
+	for page := 2; page <= totalPages && len(prev) > 0; page++ {
+		params.Set("page", strconv.Itoa(page))
+		queue, err = client.Get[model.Queue](c, "queue", params)
+		if err != nil {
+			emitError(log, ch, collector.errorMetric, "Error getting queue page", "page", page, "error", err)
+			return
+		}
+		// A target that ignores the page parameter keeps returning the same
+		// records; stop instead of counting them totalPages times.
+		if len(queue.Records) == 0 || (prev[0].ID != 0 && queue.Records[0].ID == prev[0].ID) {
+			break
+		}
+		queueStatusAll = append(queueStatusAll, queue.Records...)
+		prev = queue.Records
 	}
 	// Group metrics by status, download_status and download_state, one series
 	// per distinct label combination.

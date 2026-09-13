@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	client "github.com/onedr0p/exportarr/internal/arr/client"
 	"github.com/onedr0p/exportarr/internal/arr/config"
@@ -92,4 +93,98 @@ func TestPerAppCollectorSets(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestCollectorsUseInjectedClient points the config at an unreachable address
+// so any collector that builds its own client from config fails the scrape
+// (or, for system status, reports the app as down).
+func TestCollectorsUseInjectedClient(t *testing.T) {
+	ts := fixtureServer(t, "../testdata/sonarr/")
+	defer ts.Close()
+
+	conf := &config.ArrConfig{
+		App:        "sonarr",
+		APIVersion: "v3",
+		URL:        ts.URL,
+		APIKey:     fixtures.APIKey,
+	}
+	cl, err := client.NewClient(conf)
+	assert.NoError(t, err)
+	conf.URL = "http://127.0.0.1:1"
+
+	registry := prometheus.NewPedanticRegistry()
+	registry.MustRegister(
+		NewSonarrCollector(cl, conf),
+		NewQueueCollector(cl, conf),
+		NewHistoryCollector(cl, conf),
+		NewRootFolderCollector(cl, conf),
+		NewDiskSpaceCollector(cl, conf),
+		NewSystemStatusCollector(cl, conf),
+		NewSystemHealthCollector(cl, conf),
+	)
+
+	families, err := registry.Gather()
+	assert.NoError(t, err)
+	status := -1.0
+	for _, mf := range families {
+		assert.NotContains(t, mf.GetName(), "_collector_error")
+		if mf.GetName() == "sonarr_system_status" {
+			status = mf.GetMetric()[0].GetGauge().GetValue()
+		}
+	}
+	assert.Equal(t, status, 1.0)
+}
+
+// TestCollectorsStopAtCollectTimeout serves a target that never answers: every
+// collector must give up at the collect deadline rather than REQUEST_TIMEOUT.
+func TestCollectorsStopAtCollectTimeout(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		<-r.Context().Done()
+	}))
+	defer ts.Close()
+
+	for _, tc := range []struct {
+		app, apiVersion string
+		build           func(*client.Client, *config.ArrConfig) prometheus.Collector
+	}{
+		{"radarr", "v3", NewQueueCollector},
+		{"radarr", "v3", NewHistoryCollector},
+		{"radarr", "v3", NewRootFolderCollector},
+		{"radarr", "v3", NewDiskSpaceCollector},
+		{"radarr", "v3", func(c *client.Client, conf *config.ArrConfig) prometheus.Collector {
+			return NewSystemHealthCollector(c, conf)
+		}},
+		{"radarr", "v3", NewRadarrCollector},
+		{"prowlarr", "v1", NewProwlarrCollector},
+		{"bazarr", "", NewBazarrCollector},
+	} {
+		conf := &config.ArrConfig{
+			App:            tc.app,
+			APIVersion:     tc.apiVersion,
+			URL:            ts.URL,
+			APIKey:         fixtures.APIKey,
+			CollectTimeout: 200 * time.Millisecond,
+		}
+		cl, err := client.NewClient(conf)
+		assert.NoError(t, err)
+		c := tc.build(cl, conf)
+
+		start := time.Now()
+		// bazarr raises its gauge once per failed request, which the registry
+		// reports as a duplicate; either way the collection must fail fast.
+		failed, err := gatherErrorGauge(c)
+		assert.True(t, failed || err != nil, "%T should report the failure", c)
+		assert.True(t, time.Since(start) < 5*time.Second, "%T took %s", c, time.Since(start))
+	}
+
+	conf := &config.ArrConfig{App: "radarr", APIVersion: "v3", URL: ts.URL, APIKey: fixtures.APIKey, CollectTimeout: 200 * time.Millisecond}
+	cl, err := client.NewClient(conf)
+	assert.NoError(t, err)
+	start := time.Now()
+	registry := prometheus.NewRegistry()
+	registry.MustRegister(NewSystemStatusCollector(cl, conf))
+	families, err := registry.Gather()
+	assert.NoError(t, err)
+	assert.Equal(t, families[0].GetMetric()[0].GetGauge().GetValue(), 0.0)
+	assert.True(t, time.Since(start) < 5*time.Second, "status took %s", time.Since(start))
 }

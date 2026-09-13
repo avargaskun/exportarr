@@ -1,9 +1,11 @@
 package collector
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 
+	"github.com/onedr0p/exportarr/internal/arr/config"
 	"github.com/prometheus/client_golang/prometheus"
 	"golang.org/x/sync/errgroup"
 )
@@ -42,9 +44,24 @@ func recoverCollect(log *slog.Logger, ch chan<- prometheus.Metric, errorMetric *
 	}
 }
 
-// maxConcurrentSeriesFetches bounds the per-item API fan-out used by the
-// sonarr and lidarr collectors on large libraries.
-const maxConcurrentSeriesFetches = 10
+// seriesConcurrency is the per-item API fan-out used by the sonarr and lidarr
+// collectors, falling back to the default for configs not built by
+// LoadArrConfig.
+func seriesConcurrency(conf *config.ArrConfig) int {
+	if conf.SeriesConcurrency < 1 {
+		return config.DefaultSeriesConcurrency
+	}
+	return conf.SeriesConcurrency
+}
+
+// collectContext bounds one collection's upstream requests by the configured
+// collect timeout, if any.
+func collectContext(conf *config.ArrConfig) (context.Context, context.CancelFunc) {
+	if conf.CollectTimeout <= 0 {
+		return context.WithCancel(context.Background())
+	}
+	return context.WithTimeout(context.Background(), conf.CollectTimeout)
+}
 
 // newDesc builds a Desc namespaced to the app, with the instance URL attached
 // as a constant label — the shape shared by every *arr metric.

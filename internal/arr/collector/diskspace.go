@@ -43,7 +43,9 @@ func (collector *diskSpaceCollector) Describe(ch chan<- *prometheus.Desc) {
 func (collector *diskSpaceCollector) Collect(ch chan<- prometheus.Metric) {
 	log := slog.With("collector", "diskspace")
 	defer recoverCollect(log, ch, collector.errorMetric)
-	c := collector.client
+	ctx, cancel := collectContext(collector.config)
+	defer cancel()
+	c := collector.client.WithContext(ctx)
 
 	disks, err := client.Get[model.DiskSpace](c, "diskspace")
 	if err != nil {

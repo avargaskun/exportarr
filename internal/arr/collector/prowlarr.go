@@ -151,7 +151,9 @@ func (collector *prowlarrCollector) Collect(ch chan<- prometheus.Metric) {
 	total := time.Now()
 	log := slog.With("collector", "prowlarr")
 	defer recoverCollect(log, ch, collector.errorMetric)
-	c := collector.client
+	ctx, cancel := collectContext(collector.config)
+	defer cancel()
+	c := collector.client.WithContext(ctx)
 
 	enabledIndexers := 0
 
@@ -184,29 +186,13 @@ func (collector *prowlarrCollector) Collect(ch chan<- prometheus.Metric) {
 		}
 	}
 
-	// Hold the lock across read→fetch→accumulate: if two scrapes interleave
-	// here, both fetch the same window and the deltas get counted twice.
-	collector.statsMu.Lock()
-	startDate := collector.lastStatUpdate.In(time.UTC)
-	endDate := time.Now().In(time.UTC)
-
-	params := client.QueryParams{}
-	params.Add("startDate", startDate.Format(time.RFC3339))
-	params.Add("endDate", endDate.Format(time.RFC3339))
-
-	stats, err := client.Get[model.IndexerStatResponse](c, "indexerstats", params)
+	indexerStats, userAgentStats, activeUserAgents, err := collector.refreshStats(c)
 	if err != nil {
-		collector.statsMu.Unlock()
 		emitError(log, ch, collector.errorMetric, "Error getting indexer stats", "error", err)
 		return
 	}
-	collector.lastStatUpdate = endDate
 
-	for _, istats := range stats.Indexers {
-		collector.indexerStatCache.Update(istats.Name, istats)
-	}
-
-	for _, cistats := range collector.indexerStatCache.Values() {
+	for _, cistats := range indexerStats {
 		ch <- prometheus.MustNewConstMetric(collector.indexerAverageResponseTimeMetric, prometheus.GaugeValue, float64(cistats.AverageResponseTime), cistats.Name)
 		ch <- prometheus.MustNewConstMetric(collector.indexerQueriesMetric, prometheus.GaugeValue, float64(cistats.NumberOfQueries), cistats.Name)
 		ch <- prometheus.MustNewConstMetric(collector.indexerGrabsMetric, prometheus.GaugeValue, float64(cistats.NumberOfGrabs), cistats.Name)
@@ -218,19 +204,43 @@ func (collector *prowlarrCollector) Collect(ch chan<- prometheus.Metric) {
 		ch <- prometheus.MustNewConstMetric(collector.indexerFailedAuthQueriesMetric, prometheus.GaugeValue, float64(cistats.NumberOfFailedAuthQueries), cistats.Name)
 	}
 
-	for _, ustats := range stats.UserAgents {
-		collector.userAgentStatCache.Update(ustats.UserAgent, ustats)
-	}
-	collector.statsMu.Unlock()
-
-	for _, custats := range collector.userAgentStatCache.Values() {
+	for _, custats := range userAgentStats {
 		ch <- prometheus.MustNewConstMetric(collector.userAgentQueriesMetric, prometheus.GaugeValue, float64(custats.NumberOfQueries), custats.UserAgent)
 		ch <- prometheus.MustNewConstMetric(collector.userAgentGrabsMetric, prometheus.GaugeValue, float64(custats.NumberOfGrabs), custats.UserAgent)
 	}
 
 	ch <- prometheus.MustNewConstMetric(collector.indexerMetric, prometheus.GaugeValue, float64(len(indexers)))
-	ch <- prometheus.MustNewConstMetric(collector.userAgentMetric, prometheus.GaugeValue, float64(len(stats.UserAgents)))
+	ch <- prometheus.MustNewConstMetric(collector.userAgentMetric, prometheus.GaugeValue, float64(activeUserAgents))
 	ch <- prometheus.MustNewConstMetric(collector.indexerEnabledMetric, prometheus.GaugeValue, float64(enabledIndexers))
 
 	log.Debug("Prowlarr cycle completed", "duration", time.Since(total))
+}
+
+// refreshStats folds the stats window since the last update into the caches
+// and returns their snapshots plus the window's user-agent count.
+func (collector *prowlarrCollector) refreshStats(c *client.Client) ([]model.IndexerStats, []model.UserAgentStats, int, error) {
+	// Spans read→fetch→accumulate so interleaved scrapes can't count a window twice.
+	collector.statsMu.Lock()
+	defer collector.statsMu.Unlock()
+
+	startDate := collector.lastStatUpdate.In(time.UTC)
+	endDate := time.Now().In(time.UTC)
+
+	params := client.QueryParams{}
+	params.Add("startDate", startDate.Format(time.RFC3339))
+	params.Add("endDate", endDate.Format(time.RFC3339))
+
+	stats, err := client.Get[model.IndexerStatResponse](c, "indexerstats", params)
+	if err != nil {
+		return nil, nil, 0, err
+	}
+	collector.lastStatUpdate = endDate
+
+	for _, istats := range stats.Indexers {
+		collector.indexerStatCache.Update(istats.Name, istats)
+	}
+	for _, ustats := range stats.UserAgents {
+		collector.userAgentStatCache.Update(ustats.UserAgent, ustats)
+	}
+	return collector.indexerStatCache.Values(), collector.userAgentStatCache.Values(), len(stats.UserAgents), nil
 }

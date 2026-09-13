@@ -17,6 +17,15 @@ import (
 // apiKeyRegex matches the *arr API key format.
 var apiKeyRegex = regexp.MustCompile(`^[a-zA-Z0-9]{20,32}$`)
 
+const (
+	// DefaultSeriesConcurrency is the default per-series (sonarr) and
+	// per-artist (lidarr) request fan-out.
+	DefaultSeriesConcurrency = 10
+	// MaxSeriesConcurrency bounds the fan-out: each concurrent request can
+	// hold a database connection on the target app.
+	MaxSeriesConcurrency = 32
+)
+
 // RegisterArrFlags registers the *arr-specific flags on the given FlagSet.
 func RegisterArrFlags(flags *flag.FlagSet) {
 	flags.String("auth-username", "", "Username for form auth")
@@ -28,6 +37,7 @@ func RegisterArrFlags(flags *flag.FlagSet) {
 	flags.Bool("disable-album-metrics", false, "Skip per-album metrics (lidarr album lookups; ~1 API call per artist each scrape)")
 	flags.Bool("disable-history-metrics", false, "Skip the history endpoint; its total forces a full count over the (unprunable) history table, which is slow on multi-year instances")
 	flags.Bool("disable-wanted-metrics", false, "Skip the wanted/missing and wanted/cutoff endpoints; their totals force full counts, which is slow on very large libraries")
+	flags.Int("series-concurrency", DefaultSeriesConcurrency, fmt.Sprintf("Concurrent per-series (sonarr) and per-artist (lidarr) API calls, 1-%d", MaxSeriesConcurrency))
 }
 
 // ArrConfig is the configuration for an *arr exporter.
@@ -43,10 +53,12 @@ type ArrConfig struct {
 	DisableAlbumMetrics     bool           `env:"DISABLE_ALBUM_METRICS"`
 	DisableHistoryMetrics   bool           `env:"DISABLE_HISTORY_METRICS"`
 	DisableWantedMetrics    bool           `env:"DISABLE_WANTED_METRICS"`
+	SeriesConcurrency       int            `env:"SERIES_CONCURRENCY" envDefault:"10"`
 	URL                     string         `env:"-"` // from the base config
 	APIKey                  string         `env:"-"` // from the base config
 	DisableSSLVerify        bool           `env:"-"` // from the base config
 	RequestTimeout          time.Duration  `env:"-"` // from the base config
+	CollectTimeout          time.Duration  `env:"-"` // from the base config
 	Prowlarr                ProwlarrConfig `envPrefix:"PROWLARR__"`
 	Bazarr                  BazarrConfig   `envPrefix:"BAZARR__"`
 }
@@ -71,6 +83,7 @@ func LoadArrConfig(conf base_config.Config, flags *flag.FlagSet) (*ArrConfig, er
 		APIKey:           conf.APIKey,
 		DisableSSLVerify: conf.DisableSSLVerify,
 		RequestTimeout:   conf.RequestTimeout,
+		CollectTimeout:   conf.CollectTimeout(),
 	}
 	if err := env.Parse(out); err != nil {
 		return nil, err
@@ -85,6 +98,7 @@ func LoadArrConfig(conf base_config.Config, flags *flag.FlagSet) (*ArrConfig, er
 	base_config.OverlayFlag(flags, "disable-album-metrics", flags.GetBool, &out.DisableAlbumMetrics)
 	base_config.OverlayFlag(flags, "disable-history-metrics", flags.GetBool, &out.DisableHistoryMetrics)
 	base_config.OverlayFlag(flags, "disable-wanted-metrics", flags.GetBool, &out.DisableWantedMetrics)
+	base_config.OverlayFlag(flags, "series-concurrency", flags.GetInt, &out.SeriesConcurrency)
 	return out, nil
 }
 
@@ -98,6 +112,9 @@ func (c *ArrConfig) Validate() error {
 	}
 	if !apiKeyRegex.MatchString(c.APIKey) {
 		errs = append(errs, errors.New("api-key must be a 20-32 character alphanumeric string"))
+	}
+	if c.SeriesConcurrency < 1 || c.SeriesConcurrency > MaxSeriesConcurrency {
+		errs = append(errs, fmt.Errorf("series-concurrency must be between 1 and %d", MaxSeriesConcurrency))
 	}
 
 	if c.FormAuth {

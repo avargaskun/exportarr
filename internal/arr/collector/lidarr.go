@@ -83,6 +83,8 @@ func (collector *lidarrCollector) Collect(ch chan<- prometheus.Metric) {
 	}
 	defer collector.collectMu.Unlock()
 	c := collector.client
+	ctx, cancel := collectContext(collector.config)
+	defer cancel()
 	var artistsFileSize int64
 	var (
 		artistsMonitored = 0
@@ -96,7 +98,7 @@ func (collector *lidarrCollector) Collect(ch chan<- prometheus.Metric) {
 		qualityWeights   = map[string]string{}
 	)
 
-	artists, err := client.Get[model.Artist](c, "artist")
+	artists, err := client.GetContext[model.Artist](ctx, c, "artist")
 	if err != nil {
 		emitError(log, ch, collector.errorMetric, "Error creating client", "error", err)
 		return
@@ -107,7 +109,7 @@ func (collector *lidarrCollector) Collect(ch chan<- prometheus.Metric) {
 
 	// Quality definitions are repository-global: fetch once, not per artist.
 	if collectQuality {
-		qualities, err := client.Get[model.Qualities](c, "qualitydefinition")
+		qualities, err := client.GetContext[model.Qualities](ctx, c, "qualitydefinition")
 		if err != nil {
 			emitError(log, ch, collector.errorMetric, "Error getting qualities", "error", err)
 			return
@@ -137,15 +139,20 @@ func (collector *lidarrCollector) Collect(ch chan<- prometheus.Metric) {
 	// them out with bounded concurrency instead of ~2×N serial requests.
 	if collectQuality || collectAlbums {
 		var mu sync.Mutex
-		eg := errgroup.Group{}
-		eg.SetLimit(maxConcurrentSeriesFetches)
+		// The group's context cancels the remaining lookups on the first
+		// error or when the collect timeout expires.
+		eg, egCtx := errgroup.WithContext(ctx)
+		eg.SetLimit(seriesConcurrency(collector.config))
 		for _, s := range artists {
-			goRecoverable(&eg, func() error {
+			if egCtx.Err() != nil {
+				break
+			}
+			goRecoverable(eg, func() error {
 				params := client.QueryParams{}
 				params.Add("artistid", strconv.Itoa(s.ID))
 
 				if collectQuality {
-					songFile, err := client.Get[model.SongFile](c, "trackfile", params)
+					songFile, err := client.GetContext[model.SongFile](egCtx, c, "trackfile", params)
 					if err != nil {
 						return fmt.Errorf("getting trackfile for artist %d: %w", s.ID, err)
 					}
@@ -158,7 +165,7 @@ func (collector *lidarrCollector) Collect(ch chan<- prometheus.Metric) {
 					mu.Unlock()
 				}
 				if collectAlbums {
-					album, err := client.Get[model.Album](c, "album", params)
+					album, err := client.GetContext[model.Album](egCtx, c, "album", params)
 					if err != nil {
 						return fmt.Errorf("getting album for artist %d: %w", s.ID, err)
 					}
@@ -188,7 +195,7 @@ func (collector *lidarrCollector) Collect(ch chan<- prometheus.Metric) {
 	if !collector.config.DisableWantedMetrics {
 		missingParams := client.QueryParams{}
 		missingParams.Add("pageSize", "1")
-		missing, err := client.Get[model.Missing](c, "wanted/missing", missingParams)
+		missing, err := client.GetContext[model.Missing](ctx, c, "wanted/missing", missingParams)
 		if err != nil {
 			emitError(log, ch, collector.errorMetric, "Error getting missing albums", "error", err)
 			return

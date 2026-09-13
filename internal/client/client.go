@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -20,10 +21,16 @@ import (
 // tens of seconds, so the default is generous and overridable via config.
 const defaultRequestTimeout = 60 * time.Second
 
+// maxResponseBytes caps each decoded response body. The transport decompresses
+// gzip transparently, so this bounds the decompressed size.
+const maxResponseBytes = 256 << 20
+
 // Client struct is an *Arr client.
 type Client struct {
-	httpClient http.Client
-	URL        url.URL
+	httpClient   http.Client
+	URL          url.URL
+	maxBodyBytes int64
+	ctx          context.Context
 }
 
 // QueryParams holds URL query parameters.
@@ -48,7 +55,8 @@ func NewClient(baseURL string, insecureSkipVerify bool, timeout time.Duration, a
 			Timeout:   timeout,
 			Transport: NewExportarrTransport(BaseTransport(insecureSkipVerify), auth),
 		},
-		URL: *u,
+		URL:          *u,
+		maxBodyBytes: maxResponseBytes,
 	}, nil
 }
 
@@ -74,8 +82,26 @@ func (c *Client) unmarshalBody(b io.Reader, target any) (err error) {
 	return
 }
 
+// WithContext returns a shallow copy of c whose requests, when made without
+// an explicit context, are bound to ctx (like http.Request.WithContext). It
+// scopes one collection's requests to its deadline.
+func (c *Client) WithContext(ctx context.Context) *Client {
+	scoped := *c
+	scoped.ctx = ctx
+	return &scoped
+}
+
 // DoRequest - Take a HTTP Request and return Unmarshaled data
 func (c *Client) DoRequest(endpoint string, target any, queryParams ...QueryParams) error {
+	ctx := c.ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return c.DoRequestContext(ctx, endpoint, target, queryParams...)
+}
+
+// DoRequestContext is DoRequest bound to ctx: cancelling ctx aborts the request.
+func (c *Client) DoRequestContext(ctx context.Context, endpoint string, target any, queryParams ...QueryParams) error {
 	values := c.URL.Query()
 
 	// merge all query params
@@ -91,7 +117,7 @@ func (c *Client) DoRequest(endpoint string, target any, queryParams ...QueryPara
 	endpointURL.RawQuery = values.Encode()
 	slog.Debug("Sending HTTP request", "url", endpointURL)
 
-	req, err := http.NewRequest(http.MethodGet, endpointURL.String(), nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpointURL.String(), nil)
 	if err != nil {
 		return fmt.Errorf("failed to create HTTP Request(%s): %w", endpointURL, err)
 	}
@@ -100,13 +126,24 @@ func (c *Client) DoRequest(endpoint string, target any, queryParams ...QueryPara
 		return fmt.Errorf("failed to execute HTTP Request(%s): %w", endpointURL, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
-	return c.unmarshalBody(resp.Body, target)
+	err = c.unmarshalBody(http.MaxBytesReader(nil, resp.Body, c.maxBodyBytes), target)
+	if tooLarge := (*http.MaxBytesError)(nil); errors.As(err, &tooLarge) {
+		return fmt.Errorf("response from %s exceeds %d bytes", endpointURL, tooLarge.Limit)
+	}
+	return err
 }
 
 // Get fetches an endpoint and decodes the JSON response into T.
 func Get[T any](c *Client, endpoint string, queryParams ...QueryParams) (T, error) {
 	var out T
 	err := c.DoRequest(endpoint, &out, queryParams...)
+	return out, err
+}
+
+// GetContext is Get bound to ctx.
+func GetContext[T any](ctx context.Context, c *Client, endpoint string, queryParams ...QueryParams) (T, error) {
+	var out T
+	err := c.DoRequestContext(ctx, endpoint, &out, queryParams...)
 	return out, err
 }
 

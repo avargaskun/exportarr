@@ -1,6 +1,7 @@
 package collector
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"time"
@@ -197,6 +198,7 @@ type SabnzbdCollector struct {
 	cache                    *ServersStatsCache
 	client                   *client.Client
 	baseURL                  string
+	collectTimeout           time.Duration
 	queueQueryDuration       prometheus.Histogram
 	serverStatsQueryDuration prometheus.Histogram
 }
@@ -215,13 +217,14 @@ func NewSabnzbdCollector(config *config.SabnzbdConfig) (*SabnzbdCollector, error
 		cache:                    NewServersStatsCache(),
 		client:                   client,
 		baseURL:                  config.URL,
+		collectTimeout:           config.CollectTimeout,
 		queueQueryDuration:       newQueryDurationHistogram("queue", config.URL),
 		serverStatsQueryDuration: newQueryDurationHistogram("server_stats", config.URL),
 	}, nil
 }
 
 // getJSON fetches a SABnzbd API mode and decodes the response into T.
-func getJSON[T any](s *SabnzbdCollector, mode string, extra ...client.QueryParams) (T, error) {
+func getJSON[T any](c *client.Client, mode string, extra ...client.QueryParams) (T, error) {
 	params := client.QueryParams{}
 	params.Add("mode", mode)
 	for _, e := range extra {
@@ -231,20 +234,20 @@ func getJSON[T any](s *SabnzbdCollector, mode string, extra ...client.QueryParam
 			}
 		}
 	}
-	return client.Get[T](s.client, "/api", params)
+	return client.Get[T](c, "/api", params)
 }
 
-func (s *SabnzbdCollector) getQueueStats() (*model.QueueStats, error) {
+func getQueueStats(c *client.Client) (*model.QueueStats, error) {
 	// Slots are never read — keep the payload to the aggregate fields.
-	stats, err := getJSON[model.QueueStats](s, "queue", client.QueryParams{"limit": []string{"1"}})
+	stats, err := getJSON[model.QueueStats](c, "queue", client.QueryParams{"limit": []string{"1"}})
 	if err != nil {
 		return nil, fmt.Errorf("failed to get queue stats: %w", err)
 	}
 	return &stats, nil
 }
 
-func (s *SabnzbdCollector) getServerStats() (*model.ServerStats, error) {
-	stats, err := getJSON[model.ServerStats](s, "server_stats")
+func getServerStats(c *client.Client) (*model.ServerStats, error) {
+	stats, err := getJSON[model.ServerStats](c, "server_stats")
 	if err != nil {
 		return nil, fmt.Errorf("failed to get server stats: %w", err)
 	}
@@ -293,6 +296,13 @@ func (s *SabnzbdCollector) Collect(ch chan<- prometheus.Metric) {
 		}
 	}()
 
+	ctx, cancel := context.Background(), context.CancelFunc(func() {})
+	if s.collectTimeout > 0 {
+		ctx, cancel = context.WithTimeout(ctx, s.collectTimeout)
+	}
+	defer cancel()
+	c := s.client.WithContext(ctx)
+
 	queueStats := &model.QueueStats{}
 	serverStats := &model.ServerStats{}
 
@@ -311,7 +321,7 @@ func (s *SabnzbdCollector) Collect(ch chan<- prometheus.Metric) {
 			ch <- s.queueQueryDuration
 		}()
 
-		queueStats, err = s.getQueueStats()
+		queueStats, err = getQueueStats(c)
 		if err != nil {
 			log.Error("Failed to get queue stats", "error", err)
 			return fmt.Errorf("failed to get queue stats: %w", err)
@@ -332,7 +342,7 @@ func (s *SabnzbdCollector) Collect(ch chan<- prometheus.Metric) {
 			ch <- s.serverStatsQueryDuration
 		}()
 
-		serverStats, err = s.getServerStats()
+		serverStats, err = getServerStats(c)
 		if err != nil {
 			log.Error("Failed to get server stats", "error", err)
 			return fmt.Errorf("failed to get server stats: %w", err)

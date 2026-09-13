@@ -64,6 +64,7 @@ Visit http://127.0.0.1:9707/metrics to see the app metrics
 |            `LOG_FORMAT`            | `--log-format`                 | Log format (`console`, `json`)                                                                                            | `console`            |    ❌    |
 |        `DISABLE_SSL_VERIFY`        | `--disable-ssl-verify`         | Set to `true` to disable SSL verification                                                                                 | `false`              |    ❌    |
 |         `REQUEST_TIMEOUT`          | `--request-timeout`            | HTTP timeout per request to the target app                                                                                | `60s`                |    ❌    |
+|          `SCRAPE_TIMEOUT`          | `--scrape-timeout`             | Time budget for one scrape (`/metrics` answers 503 past it); keep it at or below Prometheus's `scrape_timeout`            | `2m`                 |    ❌    |
 |          `AUTH_PASSWORD`           | `--auth-password`              | Password for form auth                                                                                                    |                      |    ❌    |
 |          `AUTH_USERNAME`           | `--auth-username`              | Username for form auth                                                                                                    |                      |    ❌    |
 |            `FORM_AUTH`             | `--form-auth`                  | Use form-based authentication                                                                                             | `false`              |    ❌    |
@@ -73,6 +74,7 @@ Visit http://127.0.0.1:9707/metrics to see the app metrics
 |      `DISABLE_ALBUM_METRICS`       | `--disable-album-metrics`      | Skip per-album metrics (lidarr album lookups; ~1 API call per artist each scrape)                                         | `false`              |    ❌    |
 |     `DISABLE_HISTORY_METRICS`      | `--disable-history-metrics`    | Skip the history endpoint — its total forces a full count over the unprunable history table, slow on multi-year instances | `false`              |    ❌    |
 |      `DISABLE_WANTED_METRICS`      | `--disable-wanted-metrics`     | Skip the wanted/missing and wanted/cutoff endpoints — their totals force full counts, slow on very large libraries        | `false`              |    ❌    |
+|        `SERIES_CONCURRENCY`        | `--series-concurrency`         | Concurrent per-series (Sonarr) / per-artist (Lidarr) API calls, `1`–`32`; each can hold a database connection on the app  | `10`                 |    ❌    |
 |        `PROWLARR__BACKFILL`        | `--backfill`                   | Set to `true` to enable backfill of historical metrics                                                                    | `false`              |    ❌    |
 |  `PROWLARR__BACKFILL_SINCE_DATE`   | `--backfill-since-date`        | Set a date (`YYYY-MM-DD`) from which to start the backfill                                                                | `1970-01-01` (epoch) |    ❌    |
 |    `BAZARR__SERIES_BATCH_SIZE`     | `--series-batch-size`          | Number of series per Bazarr episodes API call                                                                             | `300`                |    ❌    |
@@ -96,8 +98,8 @@ Measured against real instances with **every metric enabled** — use these scal
 | -------- | -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
 | SABnzbd  | tens of milliseconds | flat — two small API calls                                                                                                                  |
 | Radarr   | a second or two      | one large movie-list payload; mostly JSON transfer + decode                                                                                 |
-| Sonarr   | a few seconds        | per-series fan-out (two API calls per series, 10 concurrent)                                                                                |
-| Lidarr   | a few seconds        | per-artist fan-out (two API calls per artist, 10 concurrent)                                                                                |
+| Sonarr   | a few seconds        | per-series fan-out (two API calls per series, `SERIES_CONCURRENCY` at a time, default 10)                                                   |
+| Lidarr   | a few seconds        | per-artist fan-out (two API calls per artist, `SERIES_CONCURRENCY` at a time, default 10)                                                   |
 | Prowlarr | fast                 | stats endpoint (see the backfill note above for the first scrape)                                                                           |
 | Bazarr   | tens of seconds      | full episode-subtitle walk; the time is spent _inside bazarr_ generating the batched responses, so batch/concurrency tuning barely moves it |
 
@@ -133,7 +135,8 @@ v3 is a breaking release. Review each section before upgrading.
 
 - A failing collector no longer fails the whole scrape with HTTP 500. `/metrics` now returns 200 with everything that succeeded, plus a per-collector error gauge (e.g. `radarr_collector_error`, `radarr_queue_collector_error`) set to `1` for whatever failed. Alerts that relied on the target reporting `up == 0` when the app was down should alert on `*_collector_error > 0` instead.
 - `sabnzbd_collector_error` renamed its `target` label to `url`, matching every other metric.
-- Overlapping collections are skipped: if a scrape arrives while the previous sonarr/lidarr/bazarr collection is still running against a slow instance, exportarr skips it (raising the collector's error gauge) instead of stacking concurrent walks onto the app — the failure mode behind bazarr CPU drainage ([#380](https://github.com/onedr0p/exportarr/issues/380)).
+- Overlapping scrapes never stack walks onto the app, the failure mode behind bazarr CPU drainage ([#380](https://github.com/onedr0p/exportarr/issues/380)): a scrape that arrives while a collection is still running waits for it and is served the same result.
+- `/metrics` serves at most two scrapes at once and answers `503` to any more, and to a scrape that exceeds `SCRAPE_TIMEOUT`. Every collector abandons its requests shortly before that deadline and raises its error gauge (system status reports `0`), so the scrape still returns whatever finished. Only `GET` (and `HEAD`) is accepted.
 
 ### Changed metrics
 
