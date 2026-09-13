@@ -3,6 +3,7 @@ package commands
 import (
 	"errors"
 	"fmt"
+	"io"
 	"maps"
 	"net/http"
 	"net/http/httptest"
@@ -304,4 +305,172 @@ func TestLabelErr(t *testing.T) {
 			assert.True(t, errors.Is(got, a), "labelErr must keep the chain")
 		})
 	}
+}
+
+const notFoundBody = "404 page not found\n"
+
+type stubHandler string
+
+func (s stubHandler) ServeHTTP(w http.ResponseWriter, _ *http.Request) {
+	_, _ = io.WriteString(w, "stub:"+string(s))
+}
+
+// serveHandlerClient serves h and returns a non-redirecting client for it.
+func serveHandlerClient(t *testing.T, h http.Handler) *runningCommand {
+	t.Helper()
+	srv := httptest.NewServer(h)
+	t.Cleanup(srv.Close)
+	client := newHarnessClient()
+	t.Cleanup(client.CloseIdleConnections)
+	return &runningCommand{t: t, url: srv.URL, client: client}
+}
+
+func routingClient(t *testing.T) *runningCommand {
+	t.Helper()
+	useAppInfo(t)
+	ts := []*target{
+		{name: "sonarr-hd", handler: stubHandler("sonarr-hd")},
+		{name: "radarr", handler: stubHandler("radarr")},
+	}
+	return serveHandlerClient(t, newServeHandler(ts, newSelfRegistry()))
+}
+
+func assertNotFound(t *testing.T, code int, body string, header http.Header, probe string) {
+	t.Helper()
+	assert.Equal(t, code, http.StatusNotFound)
+	assert.Equal(t, body, notFoundBody)
+	assert.Equal(t, header.Get("Content-Type"), "text/plain; charset=utf-8")
+	assert.NotContains(t, body, probe)
+}
+
+func TestServeHandler_NotFound(t *testing.T) {
+	rc := routingClient(t)
+	cases := []struct{ name, method, path string }{
+		{"unknown name", http.MethodGet, "/metrics/nope"},
+		{"empty name", http.MethodGet, "/metrics/"},
+		{"trailing slash", http.MethodGet, "/metrics/sonarr-hd/"},
+		{"wrong case", http.MethodGet, "/metrics/SONARR-HD"},
+		{"escaped slash inside the name", http.MethodGet, "/metrics/sonarr%2Fhd"},
+		{"escaped slash after the name", http.MethodGet, "/metrics/sonarr-hd%2F"},
+		{"raw url", http.MethodGet, "/metrics/http:%2F%2Fevil"},
+		{"deeper path", http.MethodGet, "/metrics/sonarr-hd/extra"},
+		{"post to a target", http.MethodPost, "/metrics/sonarr-hd"},
+		{"post to the index", http.MethodPost, "/"},
+		{"post to self metrics", http.MethodPost, "/metrics"},
+		{"delete a target", http.MethodDelete, "/metrics/radarr"},
+		{"other path", http.MethodGet, "/x"},
+		{"markup in the path", http.MethodGet, "/%3Cscript%3Ealert(1)%3C/script%3E"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			code, body, header := rc.Do(tc.method, tc.path, nil)
+			assertNotFound(t, code, body, header, tc.path)
+			assert.NotContains(t, body, "stub:")
+		})
+	}
+}
+
+func TestServeHandler_ServesConfiguredNames(t *testing.T) {
+	rc := routingClient(t)
+	cases := []struct{ name, path, want string }{
+		{"sonarr", "/metrics/sonarr-hd", "stub:sonarr-hd"},
+		{"radarr", "/metrics/radarr", "stub:radarr"},
+		{"query ignored", "/metrics/sonarr-hd?target=http://evil", "stub:sonarr-hd"},
+		{"escaped hyphen", "/metrics/sonarr%2Dhd", "stub:sonarr-hd"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			code, body, _ := rc.Do(http.MethodGet, tc.path, nil)
+			assert.Equal(t, code, http.StatusOK)
+			assert.Equal(t, body, tc.want)
+		})
+	}
+}
+
+func TestServeHandler_NonCleanPathsRedirectToSameHost(t *testing.T) {
+	rc := routingClient(t)
+	cases := []struct{ path, location string }{
+		{"//metrics/x", "/metrics/x"},
+		{"/metrics/../metrics/x", "/metrics/x"},
+		{"//metrics/sonarr-hd", "/metrics/sonarr-hd"},
+		{"/metrics/./radarr", "/metrics/radarr"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.path, func(t *testing.T) {
+			code, body, header := rc.Do(http.MethodGet, tc.path, nil)
+			assert.Equal(t, code, http.StatusTemporaryRedirect)
+			loc := header.Get("Location")
+			assert.Equal(t, loc, tc.location)
+			assert.True(t, strings.HasPrefix(loc, "/") && !strings.HasPrefix(loc, "//"), "Location %q leaves the host", loc)
+			assert.NotContains(t, body, "stub:")
+		})
+	}
+}
+
+func TestServeHandler_IndexHealthzAndSelfMetrics(t *testing.T) {
+	rc := routingClient(t)
+
+	code, body, header := rc.Do(http.MethodGet, "/", nil)
+	assert.Equal(t, code, http.StatusOK)
+	assert.Equal(t, header.Get("Content-Type"), "text/html; charset=utf-8")
+	assert.Equal(t, body, "<h1>Exportarr</h1><ul><li><a href='/metrics/sonarr-hd'>sonarr-hd</a></li><li><a href='/metrics/radarr'>radarr</a></li></ul>")
+
+	code, body = rc.Get("/healthz")
+	assert.Equal(t, code, http.StatusOK)
+	assert.Equal(t, body, "OK")
+
+	code, body = rc.Get("/metrics")
+	assert.Equal(t, code, http.StatusOK)
+	assert.Contains(t, body, `exportarr_app_info{app_name="exportarr",build_time="now",revision="abc",version="1.2.3"} 1`)
+	assert.Contains(t, body, "go_goroutines")
+	assert.NotContains(t, body, "stub:")
+}
+
+func TestServeHandler_SelfMetricsSeparateFromTargets(t *testing.T) {
+	useAppInfo(t)
+	cfg := &targets.Config{Targets: []targets.Target{
+		{Index: 0, Name: "one", App: "stub", URL: "http://one:1"},
+	}}
+	ts, err := buildTargets(cfg, serveProcess(), serveDefaults(), stubApps(constCollector{prometheus.NewDesc("target_series", "test", nil, nil)}))
+	assert.NoError(t, err)
+	rc := serveHandlerClient(t, newServeHandler(ts, newSelfRegistry()))
+
+	code, body := rc.Get("/metrics/one")
+	assert.Equal(t, code, http.StatusOK)
+	assert.Contains(t, body, "target_series 42")
+	for _, family := range []string{"go_", "process_", "exportarr_"} {
+		assert.NotContains(t, body, "\n"+family)
+	}
+
+	code, body = rc.Get("/metrics")
+	assert.Equal(t, code, http.StatusOK)
+	assert.Contains(t, body, "exportarr_app_info")
+	assert.Contains(t, body, "go_goroutines")
+	assert.NotContains(t, body, "target_series")
+	assert.NotContains(t, body, "stub_scrape_")
+	assert.NotContains(t, body, "promhttp_metric_handler_errors_total")
+}
+
+func TestServeHandler_HandlerPanicIs500(t *testing.T) {
+	useAppInfo(t)
+	logs := captureSlog(t)
+	ts := []*target{
+		{name: "boom", handler: http.HandlerFunc(func(http.ResponseWriter, *http.Request) { panic("handler boom") })},
+		{name: "fine", handler: stubHandler("fine")},
+	}
+	rc := serveHandlerClient(t, newServeHandler(ts, newSelfRegistry()))
+
+	code, _ := rc.Get("/metrics/boom")
+	assert.Equal(t, code, http.StatusInternalServerError)
+	assert.Contains(t, logs.String(), `msg="panic recovered" error="handler boom"`)
+
+	code, body := rc.Get("/metrics/fine")
+	assert.Equal(t, code, http.StatusOK)
+	assert.Equal(t, body, "stub:fine")
+}
+
+func TestRedactTargetURL(t *testing.T) {
+	assert.Equal(t, redactTargetURL("http://sonarr:8989/base"), "http://sonarr:8989/base")
+	assert.Equal(t, redactTargetURL("http://user:pw@sonarr:8989/base?apikey=x#frag"), "http://sonarr:8989/base") //nolint:gosec // redaction fixture
+	assert.Equal(t, redactTargetURL("http://[::1"), "")
 }

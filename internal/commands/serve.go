@@ -5,15 +5,86 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/url"
+	"os"
 	"strings"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"github.com/spf13/cobra"
 
 	arrconfig "github.com/onedr0p/exportarr/internal/arr/config"
+	"github.com/onedr0p/exportarr/internal/client"
 	"github.com/onedr0p/exportarr/internal/config"
+	"github.com/onedr0p/exportarr/internal/handlers"
 	"github.com/onedr0p/exportarr/internal/targets"
 )
+
+func init() {
+	rootCmd.AddCommand(serveCmd)
+}
+
+var serveCmd = &cobra.Command{
+	Use:   "serve",
+	Short: "Prometheus exporter for several named targets in one process",
+	Long: `Prometheus exporter for several named targets in one process.
+Targets are configured with TARGET_<n>_NAME, TARGET_<n>_APP, TARGET_<n>_URL and
+TARGET_<n>_API_KEY or TARGET_<n>_API_KEY_FILE; each is served on /metrics/<name>.`,
+	RunE: runServe,
+}
+
+func runServe(cmd *cobra.Command, _ []string) error {
+	var errs []error
+	arrDefaults, err := arrconfig.LoadArrConfig(*conf, cmd.Flags())
+	if err != nil {
+		errs = append(errs, err)
+	} else {
+		errs = append(errs, targets.CheckProcessConfig(conf, arrDefaults, cmd.Flags()))
+	}
+	// Load runs even after a process-level error so every target's secrets are unset.
+	cfg, err := targets.Load(os.Environ())
+	errs = append(errs, err)
+	if err := errors.Join(errs...); err != nil {
+		return err
+	}
+
+	ts, err := buildTargets(cfg, *conf, *arrDefaults, serveApps)
+	if err != nil {
+		return err
+	}
+	for _, t := range ts {
+		slog.Info("Configured target", "target", t.name, "app", t.app, "url", redactTargetURL(t.url))
+	}
+	return serveHTTP(cmd.Context(), maxScrapeTimeout(ts), newServeHandler(ts, newSelfRegistry()))
+}
+
+func redactTargetURL(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return ""
+	}
+	return client.RedactURL(u)
+}
+
+// newServeHandler routes GET /metrics/<name> to each target's stack and answers
+// every other path with a constant 404; self is the exporter's own /metrics.
+func newServeHandler(ts []*target, self *prometheus.Registry) http.Handler {
+	mux := http.NewServeMux()
+	names := make([]string, 0, len(ts))
+	for _, t := range ts {
+		mux.Handle("GET /metrics/"+t.name, t.handler)
+		names = append(names, t.name)
+	}
+	mux.Handle("GET /metrics", promhttp.HandlerFor(self, promhttp.HandlerOpts{
+		ErrorHandling: promhttp.ContinueOnError,
+		ErrorLog:      promhttpLogger{},
+	}))
+	mux.HandleFunc("GET /healthz", handlers.HealthzHandler)
+	mux.Handle("GET /{$}", handlers.TargetIndexHandler(names))
+	mux.HandleFunc("/", handlers.NotFoundHandler)
+	return handlers.LogHandler(handlers.RecoveryHandler(mux))
+}
 
 // appBuilder resolves a target into its app's collectors and the URL they scrape.
 type appBuilder func(t *targets.Target, process config.Config, arrDefaults arrconfig.ArrConfig) (url string, cs []prometheus.Collector, err error)
