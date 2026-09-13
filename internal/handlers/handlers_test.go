@@ -3,6 +3,7 @@ package handlers
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -24,6 +25,73 @@ func TestIndexHandler(t *testing.T) {
 
 	assert.Equal(t, rec.Code, http.StatusOK)
 	assert.Contains(t, rec.Body.String(), "/metrics")
+}
+
+func TestTargetIndexHandler(t *testing.T) {
+	rec := httptest.NewRecorder()
+	TargetIndexHandler([]string{"sonarr-hd", "radarr", "sab_1"}).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+
+	assert.Equal(t, rec.Code, http.StatusOK)
+	assert.Equal(t, rec.Header().Get("Content-Type"), "text/html; charset=utf-8")
+	assert.Equal(t, rec.Body.String(), "<h1>Exportarr</h1><ul>"+
+		"<li><a href='/metrics/sonarr-hd'>sonarr-hd</a></li>"+
+		"<li><a href='/metrics/radarr'>radarr</a></li>"+
+		"<li><a href='/metrics/sab_1'>sab_1</a></li>"+
+		"</ul>")
+}
+
+func TestTargetIndexHandler_Empty(t *testing.T) {
+	rec := httptest.NewRecorder()
+	TargetIndexHandler(nil).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+
+	assert.Equal(t, rec.Code, http.StatusOK)
+	assert.Equal(t, rec.Body.String(), "<h1>Exportarr</h1><ul></ul>")
+}
+
+func TestTargetIndexHandler_EscapesNames(t *testing.T) {
+	rec := httptest.NewRecorder()
+	TargetIndexHandler([]string{"<script>alert('x')</script>&"}).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+
+	body := rec.Body.String()
+	assert.NotContains(t, body, "<script>")
+	assert.NotContains(t, body, "alert('x')")
+	assert.Equal(t, body, "<h1>Exportarr</h1><ul>"+
+		"<li><a href='/metrics/&lt;script&gt;alert(&#39;x&#39;)&lt;/script&gt;&amp;'>"+
+		"&lt;script&gt;alert(&#39;x&#39;)&lt;/script&gt;&amp;</a></li></ul>")
+}
+
+func TestNotFoundHandler_IsConstant(t *testing.T) {
+	cases := []struct {
+		method, target string
+	}{
+		{http.MethodGet, "/x"},
+		{http.MethodGet, "/metrics/nope"},
+		{http.MethodPost, "/"},
+		{http.MethodPut, "/metrics/sonarr"},
+		{http.MethodDelete, "/metrics/http:%2F%2Fevil"},
+		{http.MethodGet, "/probe?target=http://evil.example/%3Cscript%3E"},
+		{http.MethodGet, "/%3Cscript%3Ealert(1)%3C/script%3E?q=%3Cb%3E"},
+		{http.MethodHead, "/secret-path-marker"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.method+" "+tc.target, func(t *testing.T) {
+			req := httptest.NewRequest(tc.method, tc.target, strings.NewReader("request-body-marker"))
+			rec := httptest.NewRecorder()
+			NotFoundHandler(rec, req)
+
+			assert.Equal(t, rec.Code, http.StatusNotFound)
+			assert.Equal(t, rec.Header().Get("Content-Type"), "text/plain; charset=utf-8")
+			assert.Equal(t, rec.Header().Get("X-Content-Type-Options"), "nosniff")
+			body := rec.Body.String()
+			assert.Equal(t, body, "404 page not found\n")
+			for _, part := range []string{req.URL.Path, req.URL.RawQuery, "<", "evil", "marker"} {
+				if part != "" {
+					assert.NotContains(t, body, part)
+				}
+			}
+			assert.Equal(t, len(rec.Header()), 2, "unexpected headers %v", rec.Header())
+		})
+	}
 }
 
 func TestRecoveryHandler(t *testing.T) {

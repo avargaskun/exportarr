@@ -43,6 +43,15 @@ func resolvableTarget() Target {
 	return Target{Index: 1, Name: "sonarr-hd", App: "sonarr", URL: "http://sonarr-hd:8989", APIKey: testKey}
 }
 
+// completenessTarget uses a prowlarr target for PROWLARR__* overrides, the only app that resolves them.
+func completenessTarget(path string) Target {
+	tgt := resolvableTarget()
+	if strings.HasPrefix(path, "Prowlarr.") {
+		tgt.App = "prowlarr"
+	}
+	return tgt
+}
+
 // resolved holds addressable copies of every config a target resolves into.
 type resolved struct {
 	base config.Config
@@ -151,14 +160,14 @@ func TestResolve_OverrideCompleteness(t *testing.T) {
 			if !ok {
 				t.Fatalf("pointer field %s has no entry in overrideDestinations", path)
 			}
-			tgt := resolvableTarget()
+			tgt := completenessTarget(path)
 			ptr := reflect.ValueOf(&tgt).Elem().FieldByIndex(index)
 			value := nonDefault(t, ptr.Type().Elem())
 			ptr.Set(reflect.New(ptr.Type().Elem()))
 			ptr.Elem().Set(value)
 
 			got := resolveAll(t, tgt)
-			want := resolveAll(t, resolvableTarget())
+			want := resolveAll(t, completenessTarget(path))
 			for _, dest := range dests {
 				g := got.field(t, dest)
 				assert.False(t, reflect.DeepEqual(g.Interface(), want.field(t, dest).Interface()), "%s did not change %s", path, dest)
@@ -356,6 +365,27 @@ func TestArrConfig_Backfill(t *testing.T) {
 	assert.Error(t, err)
 	assert.Equal(t, err.Error(), "target 3/prowl: backfill-since-date must be in the format YYYY-MM-DD")
 	assert.NotContains(t, err.Error(), "someday")
+}
+
+func TestArrConfig_ProcessBackfillDateOnlyAffectsProwlarr(t *testing.T) {
+	defaults := processDefaults()
+	defaults.Prowlarr.BackfillSinceDate = "2024-13-01"
+
+	for _, app := range []string{"radarr", "sonarr", "lidarr", "bazarr"} {
+		t.Run(app, func(t *testing.T) {
+			tgt := Target{Index: 0, Name: app + "-main", App: app, URL: "http://" + app + ":1", APIKey: testKey}
+			got, err := tgt.ArrConfig(defaults, processConfig())
+			assert.NoError(t, err)
+			assert.Equal(t, got.Prowlarr.BackfillSinceDate, "2024-13-01")
+			assert.True(t, got.Prowlarr.BackfillSinceTime.IsZero())
+		})
+	}
+
+	tgt := Target{Index: 4, Name: "prowl", App: "prowlarr", URL: "http://prowlarr:9696", APIKey: testKey}
+	got, err := tgt.ArrConfig(defaults, processConfig())
+	assert.Nil(t, got)
+	assert.Error(t, err)
+	assert.Equal(t, err.Error(), "target 4/prowl: backfill-since-date must be in the format YYYY-MM-DD")
 }
 
 func TestSabnzbdConfig(t *testing.T) {

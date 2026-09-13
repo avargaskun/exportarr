@@ -113,7 +113,7 @@ func (c *Client) DoRequestContext(ctx context.Context, endpoint string, target a
 
 	endpointURL := c.URL.JoinPath(endpoint)
 	endpointURL.RawQuery = values.Encode()
-	logURL := redactURL(endpointURL)
+	logURL := RedactURL(endpointURL)
 	slog.Debug("Sending HTTP request", "url", logURL)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpointURL.String(), nil)
@@ -150,9 +150,9 @@ func GetContext[T any](ctx context.Context, c *Client, endpoint string, queryPar
 	return out, err
 }
 
-// redactURL renders u as scheme://host[:port]/path, dropping the userinfo,
+// RedactURL renders u as scheme://host[:port]/path, dropping the userinfo,
 // query and fragment, any of which can carry credentials.
-func redactURL(u *url.URL) string {
+func RedactURL(u *url.URL) string {
 	return (&url.URL{Scheme: u.Scheme, Host: u.Host, Path: u.Path}).String()
 }
 

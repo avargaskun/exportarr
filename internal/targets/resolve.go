@@ -38,7 +38,8 @@ func (t *Target) BaseConfig(process config.Config) config.Config {
 
 // ArrConfig resolves this target into an ordinary *ArrConfig: copy of the process
 // defaults → ApplyBase(t.BaseConfig(process)) → non-nil overrides → FormAuth/AUTH_* →
-// Target = t.Name → ResolveBackfillSince(). The caller sets APIVersion and runs Validate.
+// Target = t.Name → ResolveBackfillSince() (prowlarr only, as in single-target mode).
+// The caller sets APIVersion and runs Validate.
 func (t *Target) ArrConfig(defaults arrconfig.ArrConfig, process config.Config) (*arrconfig.ArrConfig, error) {
 	c := defaults
 	c.ApplyBase(t.BaseConfig(process))
@@ -57,8 +58,10 @@ func (t *Target) ArrConfig(defaults arrconfig.ArrConfig, process config.Config) 
 	c.AuthUsername = t.AuthUsername
 	c.AuthPassword = t.AuthPassword
 	c.Target = t.Name
-	if err := c.ResolveBackfillSince(); err != nil {
-		return nil, fmt.Errorf("%s: %w", t.Label(), err)
+	if t.App == "prowlarr" {
+		if err := c.ResolveBackfillSince(); err != nil {
+			return nil, fmt.Errorf("%s: %w", t.Label(), err)
+		}
 	}
 	return &c, nil
 }

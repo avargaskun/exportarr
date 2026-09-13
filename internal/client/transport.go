@@ -102,7 +102,7 @@ func (t *ExportarrTransport) RoundTrip(req *http.Request) (*http.Response, error
 		if lerr == nil {
 			// Location resolves against the authenticated request, so it can
 			// carry query-string credentials such as SABnzbd's apikey.
-			return nil, fmt.Errorf("received Redirect Status Code: %d, Location: %s", resp.StatusCode, redactURL(location))
+			return nil, fmt.Errorf("received Redirect Status Code: %d, Location: %s", resp.StatusCode, RedactURL(location))
 		}
 		return nil, fmt.Errorf("received Redirect Status Code: %d, ", resp.StatusCode)
 	}
