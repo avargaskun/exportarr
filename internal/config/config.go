@@ -35,9 +35,8 @@ type Config struct {
 	LogLevel  string `env:"LOG_LEVEL" envDefault:"info"`
 	LogFormat string `env:"LOG_FORMAT" envDefault:"console"`
 	URL       string `env:"URL"`
-	// Secret-bearing variables carry the `unset` option: the env library
-	// removes them from the process environment after parsing, so they are
-	// not visible in /proc/<pid>/environ or inherited by child processes.
+	// `unset` only hides secrets from os.Environ and child processes; they stay
+	// in /proc/<pid>/environ and `docker inspect`, so prefer API_KEY_FILE.
 	APIKey string `env:"API_KEY,unset"`
 	// APIKeyFromFile receives the *contents* of the file named by API_KEY_FILE
 	// (the env library's `file` option) — Docker/Kubernetes secrets mounts.

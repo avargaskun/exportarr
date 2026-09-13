@@ -81,6 +81,11 @@ Visit http://127.0.0.1:9707/metrics to see the app metrics
 |    `BAZARR__SERIES_BATCH_SIZE`     | `--series-batch-size`          | Number of series per Bazarr episodes API call                                                                             | `300`                |    ❌    |
 | `BAZARR__SERIES_BATCH_CONCURRENCY` | `--series-batch-concurrency`   | Concurrent Bazarr episodes API calls                                                                                      | `10`                 |    ❌    |
 
+### Secrets
+
+- Prefer `API_KEY_FILE` pointing at a read-only mounted secret (Docker or Kubernetes secrets) over an inline `API_KEY`.
+- `API_KEY`, `AUTH_USERNAME` and `AUTH_PASSWORD` are removed from the exporter's own environment after they are read, so child processes and `os.Environ` never see them. They remain visible in `/proc/<pid>/environ` and `docker inspect`, so this is not a substitute for a mounted secret.
+
 ### Prowlarr Backfill
 
 The Prowlarr collector is a little different than other collectors as it's hitting an actual "stats" endpoint, collecting counters of events that happened in a small time window, rather than getting all-time statistics like the other collectors. This means that by default, when you start the Prowlarr collector, collected stats will start from that moment (all counters will start from zero).

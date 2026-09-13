@@ -44,8 +44,8 @@ func RegisterArrFlags(flags *flag.FlagSet) {
 type ArrConfig struct {
 	App                     string         `env:"-"`
 	APIVersion              string         `env:"API_VERSION" envDefault:"v3"`
-	AuthUsername            string         `env:"AUTH_USERNAME"`
-	AuthPassword            string         `env:"AUTH_PASSWORD"`
+	AuthUsername            string         `env:"AUTH_USERNAME,unset"`
+	AuthPassword            string         `env:"AUTH_PASSWORD,unset"`
 	FormAuth                bool           `env:"FORM_AUTH"`
 	EnableUnknownQueueItems bool           `env:"ENABLE_UNKNOWN_QUEUE_ITEMS"`
 	DisableQualityMetrics   bool           `env:"DISABLE_QUALITY_METRICS"`

@@ -2,6 +2,7 @@ package config
 
 import (
 	"github.com/onedr0p/exportarr/internal/assert"
+	"os"
 	"testing"
 	"time"
 
@@ -108,6 +109,21 @@ func TestLoadConfig_Environment(t *testing.T) {
 	assert.Equal(t, config.APIKey, "abcdef0123456789abcdef0123456789")
 	assert.True(t, config.DisableSSLVerify)
 
+}
+
+func TestLoadConfig_UnsetsFormAuthCredentials(t *testing.T) {
+	t.Setenv("AUTH_USERNAME", "user")
+	t.Setenv("AUTH_PASSWORD", "pass")
+
+	config, err := LoadArrConfig(base_config.Config{}, testFlagSet())
+	assert.NoError(t, err)
+	assert.Equal(t, config.AuthUsername, "user")
+	assert.Equal(t, config.AuthPassword, "pass")
+
+	_, ok := os.LookupEnv("AUTH_USERNAME")
+	assert.False(t, ok, "AUTH_USERNAME should be removed from the environment")
+	_, ok = os.LookupEnv("AUTH_PASSWORD")
+	assert.False(t, ok, "AUTH_PASSWORD should be removed from the environment")
 }
 
 func TestLoadConfig_PartialEnvironment(t *testing.T) {
