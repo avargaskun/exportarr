@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -20,10 +21,15 @@ import (
 // tens of seconds, so the default is generous and overridable via config.
 const defaultRequestTimeout = 60 * time.Second
 
+// maxResponseBytes caps each decoded response body. The transport decompresses
+// gzip transparently, so this bounds the decompressed size.
+const maxResponseBytes = 256 << 20
+
 // Client struct is an *Arr client.
 type Client struct {
-	httpClient http.Client
-	URL        url.URL
+	httpClient   http.Client
+	URL          url.URL
+	maxBodyBytes int64
 }
 
 // QueryParams holds URL query parameters.
@@ -48,7 +54,8 @@ func NewClient(baseURL string, insecureSkipVerify bool, timeout time.Duration, a
 			Timeout:   timeout,
 			Transport: NewExportarrTransport(BaseTransport(insecureSkipVerify), auth),
 		},
-		URL: *u,
+		URL:          *u,
+		maxBodyBytes: maxResponseBytes,
 	}, nil
 }
 
@@ -100,7 +107,11 @@ func (c *Client) DoRequest(endpoint string, target any, queryParams ...QueryPara
 		return fmt.Errorf("failed to execute HTTP Request(%s): %w", endpointURL, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
-	return c.unmarshalBody(resp.Body, target)
+	err = c.unmarshalBody(http.MaxBytesReader(nil, resp.Body, c.maxBodyBytes), target)
+	if tooLarge := (*http.MaxBytesError)(nil); errors.As(err, &tooLarge) {
+		return fmt.Errorf("response from %s exceeds %d bytes", endpointURL, tooLarge.Limit)
+	}
+	return err
 }
 
 // Get fetches an endpoint and decodes the JSON response into T.

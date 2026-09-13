@@ -6,6 +6,7 @@ import (
 	"github.com/onedr0p/exportarr/internal/assert"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -99,4 +100,24 @@ func TestDoRequest_PanicRecovery(t *testing.T) {
 	assert.NotPanics(t, func() {
 		assert.Error(t, err, "DoRequest should return an error: %s", err)
 	}, "DoRequest should recover from a panic")
+}
+
+func TestDoRequest_ResponseTooLarge(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = fmt.Fprintf(w, "[%q]", strings.Repeat("a", 2048))
+	}))
+	defer ts.Close()
+
+	client, err := NewClient(ts.URL, false, 0, nil)
+	assert.NoError(t, err)
+	client.maxBodyBytes = 1024
+
+	var out []string
+	err = client.DoRequest("test", &out)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "exceeds 1024 bytes")
+
+	client.maxBodyBytes = 4096
+	assert.NoError(t, client.DoRequest("test", &out))
+	assert.Equal(t, len(out), 1)
 }
