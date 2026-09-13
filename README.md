@@ -6,6 +6,19 @@ AIO Prometheus Exporter for Sonarr, Radarr, Lidarr, Prowlarr, Bazarr and Sabnzbd
 
 Note: This exporter will not gather metrics from all apps at once. You will need an `exportarr` instance for each app. Be sure to see the examples below for more information.
 
+## About this fork
+
+This is [avargaskun/exportarr](https://github.com/avargaskun/exportarr), a fork of [onedr0p/exportarr](https://github.com/onedr0p/exportarr). It ships upstream's v3 rewrite, which upstream merged but has not released, plus security and availability hardening. It stays close to upstream so switching back is cheap once upstream releases v3.
+
+- **Image:** `ghcr.io/avargaskun/exportarr` for `linux/amd64` and `linux/arm64`. It is built only by this repository's CI from reviewed source, and publishing requires tests and lint to pass on the release commit.
+- **Tags:** `X.Y.Z` (pin this), `X.Y`, `X` and `latest`, with no `v` prefix. Git tags and GitHub releases are `vX.Y.Z`.
+- **Releases:** [release-please](https://github.com/googleapis/release-please) cuts releases from conventional commits on `dev`: `fix:` bumps the patch version, `feat:` the minor. The major version tracks upstream's. The first release is `3.1.0`, because upstream's unreleased v3 would be `3.0.0`.
+- **Differences from upstream v3 (`52bb6eb`):**
+  - Image: no UPX or catatonit, `ENTRYPOINT ["/exportarr"]`, `scratch` plus the CA bundle, UID `65532`, embedded tzdata, patched Go.
+  - The default port is `9707` for both the binary and the image (upstream's code said `8081`).
+  - New settings: `SCRAPE_TIMEOUT`, `SERIES_CONCURRENCY` and `PROXY_FROM_ENV` (see [Configuration](#configuration)).
+  - Hardening: environment proxies are ignored by default, and URLs with credentials or query strings are rejected. Secrets stay out of logs and redirect errors. Response bodies are capped at 256 MiB, and queue pagination and the Sonarr/Lidarr fan-out are bounded. Concurrent and overlong `/metrics` scrapes are limited, the HTTP server has timeouts, and shell completion is removed.
+
 ![image](.github/images/dashboard-2.png)
 
 ## Usage
@@ -22,6 +35,8 @@ See examples in the [examples/kubernetes](./examples/kubernetes/) directory.
 
 _Replace `$app` and `$port` with one of the supported apps and its port, and put the app's API key in `./api_key`_
 
+<!-- x-release-please-start-version -->
+
 ```sh
 # PORT must be unique across all Exportarr instances.
 # ./api_key must be readable by UID 65532, the container user.
@@ -32,8 +47,10 @@ docker run --name exportarr_$app \
   -v "$PWD/api_key:/run/secrets/api_key:ro" \
   --restart unless-stopped \
   -p 9707:9707 \
-  -d ghcr.io/onedr0p/exportarr:latest $app
+  -d ghcr.io/avargaskun/exportarr:3.1.0 $app
 ```
+
+<!-- x-release-please-end -->
 
 Visit http://127.0.0.1:9707/metrics to see the app metrics
 

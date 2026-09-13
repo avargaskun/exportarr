@@ -61,7 +61,7 @@ spec:
     spec:
       containers:
         - name: radarr-exporter
-          image: ghcr.io/onedr0p/exportarr:v1.5.3
+          image: ghcr.io/avargaskun/exportarr:3.1.0 # x-release-please-version
           imagePullPolicy: IfNotPresent
           args:
             - radarr
@@ -70,11 +70,15 @@ spec:
               value: "9707"
             - name: URL
               value: "http://radarr.default.svc.cluster.local:7878"
-            - name: API_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: radarr-exporter
-                  key: api-key
+            - name: API_KEY_FILE
+              value: /run/secrets/exportarr/api-key
+            # A few seconds below the ServiceMonitor's scrapeTimeout.
+            - name: SCRAPE_TIMEOUT
+              value: "85s"
+          volumeMounts:
+            - name: api-key
+              mountPath: /run/secrets/exportarr
+              readOnly: true
           ports:
             - name: monitoring
               containerPort: 9707
@@ -97,3 +101,10 @@ spec:
             limits:
               cpu: 500m
               memory: 256Mi
+      volumes:
+        - name: api-key
+          secret:
+            secretName: radarr-exporter
+            items:
+              - key: api-key
+                path: api-key

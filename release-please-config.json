@@ -13,7 +13,14 @@
       "include-component-in-tag": false,
       "include-v-in-tag": true,
       "include-v-in-release-name": true,
-      "always-update": true
+      "always-update": true,
+      "extra-files": [
+        "README.md",
+        "examples/compose/docker-compose.yaml",
+        "examples/kubernetes/lidarr-exporter.yaml",
+        "examples/kubernetes/radarr-exporter.yaml",
+        "examples/kubernetes/sonarr-exporter.yaml"
+      ]
     }
   },
   "changelog-sections": [
