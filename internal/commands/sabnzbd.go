@@ -3,6 +3,7 @@ package commands
 import (
 	"github.com/onedr0p/exportarr/internal/sabnzbd/collector"
 	"github.com/onedr0p/exportarr/internal/sabnzbd/config"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/spf13/cobra"
 )
 
@@ -20,14 +21,22 @@ var sabnzbdCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		if err := c.Validate(); err != nil {
-			return err
-		}
-
-		collector, err := collector.NewSabnzbdCollector(c)
+		cs, err := buildSabnzbd(c)
 		if err != nil {
 			return err
 		}
-		return serveHTTP(cmd.Context(), conf.ScrapeTimeout, singleTargetHandler(collector))
+		return serveHTTP(cmd.Context(), conf.ScrapeTimeout, singleTargetHandler(cs...))
 	},
+}
+
+// buildSabnzbd validates a resolved config and constructs the SABnzbd collector.
+func buildSabnzbd(c *config.SabnzbdConfig) ([]prometheus.Collector, error) {
+	if err := c.Validate(); err != nil {
+		return nil, err
+	}
+	sab, err := collector.NewSabnzbdCollector(c)
+	if err != nil {
+		return nil, err
+	}
+	return []prometheus.Collector{sab}, nil
 }

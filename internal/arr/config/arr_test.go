@@ -3,6 +3,7 @@ package config
 import (
 	"github.com/onedr0p/exportarr/internal/assert"
 	"os"
+	"reflect"
 	"testing"
 	"time"
 
@@ -337,4 +338,117 @@ func TestValidate(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestApplyBase(t *testing.T) {
+	copied := []string{"App", "URL", "APIKey", "DisableSSLVerify", "ProxyFromEnv", "RequestTimeout", "CollectTimeout"}
+	filled := ArrConfig{
+		App:                     "radarr",
+		APIVersion:              "v3",
+		AuthUsername:            "user",
+		AuthPassword:            "pass",
+		FormAuth:                true,
+		EnableUnknownQueueItems: true,
+		DisableQualityMetrics:   true,
+		DisableEpisodeMetrics:   true,
+		DisableAlbumMetrics:     true,
+		DisableHistoryMetrics:   true,
+		DisableWantedMetrics:    true,
+		SeriesConcurrency:       4,
+		URL:                     "http://radarr:7878",
+		APIKey:                  "0123456789abcdef0123456789abcdef",
+		DisableSSLVerify:        true,
+		ProxyFromEnv:            true,
+		RequestTimeout:          3 * time.Second,
+		CollectTimeout:          4 * time.Second,
+		Prowlarr: ProwlarrConfig{
+			Backfill:          true,
+			BackfillSinceDate: "2021-01-01",
+			BackfillSinceTime: time.Date(2021, 1, 1, 0, 0, 0, 0, time.UTC),
+		},
+		Bazarr: BazarrConfig{SeriesBatchSize: 7, SeriesBatchConcurrency: 8},
+	}
+	empty := filled
+	empty.DisableSSLVerify = false
+	empty.ProxyFromEnv = false
+
+	params := []struct {
+		name   string
+		before ArrConfig
+		base   base_config.Config
+		want   map[string]any
+	}{
+		{
+			name:   "sets every base field",
+			before: empty,
+			base: base_config.Config{
+				App:              "sonarr",
+				LogLevel:         "debug",
+				URL:              "http://sonarr:8989",
+				APIKey:           "abcdef0123456789abcdef0123456789",
+				Port:             1234,
+				DisableSSLVerify: true,
+				ProxyFromEnv:     true,
+				RequestTimeout:   7 * time.Second,
+				ScrapeTimeout:    time.Minute,
+			},
+			want: map[string]any{
+				"App":              "sonarr",
+				"URL":              "http://sonarr:8989",
+				"APIKey":           "abcdef0123456789abcdef0123456789",
+				"DisableSSLVerify": true,
+				"ProxyFromEnv":     true,
+				"RequestTimeout":   7 * time.Second,
+				"CollectTimeout":   55 * time.Second,
+			},
+		},
+		{
+			name:   "zero base clears every base field",
+			before: filled,
+			base:   base_config.Config{},
+			want: map[string]any{
+				"App":              "",
+				"URL":              "",
+				"APIKey":           "",
+				"DisableSSLVerify": false,
+				"ProxyFromEnv":     false,
+				"RequestTimeout":   time.Duration(0),
+				"CollectTimeout":   time.Duration(0),
+			},
+		},
+	}
+	for _, p := range params {
+		t.Run(p.name, func(t *testing.T) {
+			assert.Equal(t, len(p.want), len(copied))
+			got := p.before
+			got.ApplyBase(p.base)
+			gv, bv := reflect.ValueOf(got), reflect.ValueOf(p.before)
+			for i := range gv.NumField() {
+				name := gv.Type().Field(i).Name
+				if want, ok := p.want[name]; ok {
+					assert.DeepEqual(t, gv.Field(i).Interface(), want, name)
+					continue
+				}
+				assert.False(t, bv.Field(i).IsZero(), "fixture must set %s so a clobber is visible", name)
+				assert.DeepEqual(t, gv.Field(i).Interface(), bv.Field(i).Interface(), name)
+			}
+		})
+	}
+}
+
+func TestLoadConfig_SeedsFromApplyBase(t *testing.T) {
+	base := base_config.Config{
+		App:              "lidarr",
+		URL:              "http://lidarr:8686",
+		APIKey:           "abcdef0123456789abcdef0123456789",
+		DisableSSLVerify: true,
+		ProxyFromEnv:     true,
+		RequestTimeout:   9 * time.Second,
+		ScrapeTimeout:    30 * time.Second,
+	}
+	got, err := LoadArrConfig(base, testFlagSet())
+	assert.NoError(t, err)
+	want := ArrConfig{SeriesConcurrency: DefaultSeriesConcurrency, Bazarr: BazarrConfig{SeriesBatchSize: 300, SeriesBatchConcurrency: 10}}
+	want.ApplyBase(base)
+	assert.DeepEqual(t, *got, want)
 }

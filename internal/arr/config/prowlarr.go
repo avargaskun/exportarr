@@ -42,12 +42,20 @@ func (p ProwlarrConfig) Validate() error {
 func (c *ArrConfig) LoadProwlarrConfig(flags *flag.FlagSet) error {
 	base_config.OverlayFlag(flags, "backfill", flags.GetBool, &c.Prowlarr.Backfill)
 	base_config.OverlayFlag(flags, "backfill-since-date", flags.GetString, &c.Prowlarr.BackfillSinceDate)
-	if c.Prowlarr.BackfillSinceDate != "" {
-		t, err := time.Parse(backfillDateFormat, c.Prowlarr.BackfillSinceDate)
-		if err != nil {
-			return errors.New("backfill-since-date must be in the format YYYY-MM-DD")
-		}
-		c.Prowlarr.BackfillSinceTime = t
+	return c.ResolveBackfillSince()
+}
+
+// ResolveBackfillSince derives BackfillSinceTime from BackfillSinceDate; an
+// empty date yields the zero time.
+func (c *ArrConfig) ResolveBackfillSince() error {
+	if c.Prowlarr.BackfillSinceDate == "" {
+		c.Prowlarr.BackfillSinceTime = time.Time{}
+		return nil
 	}
+	t, err := time.Parse(backfillDateFormat, c.Prowlarr.BackfillSinceDate)
+	if err != nil {
+		return errors.New("backfill-since-date must be in the format YYYY-MM-DD")
+	}
+	c.Prowlarr.BackfillSinceTime = t
 	return nil
 }
