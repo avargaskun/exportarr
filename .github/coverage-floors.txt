@@ -1,12 +1,12 @@
 # <import path> <minimum statement coverage percent, or - to exclude>; checked by internal/tools/covercheck
 github.com/onedr0p/exportarr/cmd/exportarr -
 github.com/onedr0p/exportarr/internal/arr/client 90
-github.com/onedr0p/exportarr/internal/arr/collector 90
-github.com/onedr0p/exportarr/internal/arr/config 84
+github.com/onedr0p/exportarr/internal/arr/collector 92
+github.com/onedr0p/exportarr/internal/arr/config 93
 github.com/onedr0p/exportarr/internal/arr/model 85
 github.com/onedr0p/exportarr/internal/assert -
 github.com/onedr0p/exportarr/internal/client 96
-github.com/onedr0p/exportarr/internal/commands 77
+github.com/onedr0p/exportarr/internal/commands 88
 github.com/onedr0p/exportarr/internal/config 100
 github.com/onedr0p/exportarr/internal/fixtures 100
 github.com/onedr0p/exportarr/internal/handlers 100

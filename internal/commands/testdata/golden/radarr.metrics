@@ -1,0 +1,84 @@
+# HELP exportarr_app_info A metric with a constant '1' value labeled by app name, version, build time, and revision.
+# TYPE exportarr_app_info gauge
+exportarr_app_info{app_name="exportarr",build_time="",revision="",version="development"} 1
+# HELP promhttp_metric_handler_errors_total Total number of internal errors encountered by the promhttp metric handler.
+# TYPE promhttp_metric_handler_errors_total counter
+promhttp_metric_handler_errors_total{cause="encoding"} 0
+promhttp_metric_handler_errors_total{cause="gathering"} 0
+# HELP radarr_diskspace_free_bytes Free disk space in bytes by path and label
+# TYPE radarr_diskspace_free_bytes gauge
+radarr_diskspace_free_bytes{label="",path="/",url="http://fixture"} 1.073741824e+10
+radarr_diskspace_free_bytes{label="media",path="/data",url="http://fixture"} 5.36870912e+11
+# HELP radarr_diskspace_total_bytes Total disk space in bytes by path and label
+# TYPE radarr_diskspace_total_bytes gauge
+radarr_diskspace_total_bytes{label="",path="/",url="http://fixture"} 2.147483648e+10
+radarr_diskspace_total_bytes{label="media",path="/data",url="http://fixture"} 1.073741824e+12
+# HELP radarr_history_total Total number of item in the history
+# TYPE radarr_history_total gauge
+radarr_history_total{url="http://fixture"} 1368
+# HELP radarr_movie_cutoff_unmet_total Total number of movies with cutoff unmet
+# TYPE radarr_movie_cutoff_unmet_total gauge
+radarr_movie_cutoff_unmet_total{url="http://fixture"} 1179
+# HELP radarr_movie_downloaded_total Total number of downloaded movies
+# TYPE radarr_movie_downloaded_total gauge
+radarr_movie_downloaded_total{url="http://fixture"} 4
+# HELP radarr_movie_editions Total number of movies with `edition` set
+# TYPE radarr_movie_editions gauge
+radarr_movie_editions{url="http://fixture"} 2
+# HELP radarr_movie_filesize_total Total filesize of all movies
+# TYPE radarr_movie_filesize_total gauge
+radarr_movie_filesize_total{url="http://fixture"} 1.47062956689e+11
+# HELP radarr_movie_missing_total Total number of missing movies
+# TYPE radarr_movie_missing_total gauge
+radarr_movie_missing_total{url="http://fixture"} 2
+# HELP radarr_movie_monitored_total Total number of monitored movies
+# TYPE radarr_movie_monitored_total gauge
+radarr_movie_monitored_total{url="http://fixture"} 7
+# HELP radarr_movie_quality_total Total number of downloaded movies by quality
+# TYPE radarr_movie_quality_total gauge
+radarr_movie_quality_total{quality="Bluray-1080p",url="http://fixture",weight="5"} 1
+radarr_movie_quality_total{quality="Bluray-2160p",url="http://fixture",weight="10"} 2
+radarr_movie_quality_total{quality="Remux-2160p",url="http://fixture",weight="15"} 1
+# HELP radarr_movie_tag_total Total number of downloaded movies by tag
+# TYPE radarr_movie_tag_total gauge
+radarr_movie_tag_total{tag="somelabel",url="http://fixture"} 3
+radarr_movie_tag_total{tag="someotherlabel",url="http://fixture"} 3
+# HELP radarr_movie_total Total number of movies
+# TYPE radarr_movie_total gauge
+radarr_movie_total{url="http://fixture"} 8
+# HELP radarr_movie_unmonitored_total Total number of unmonitored movies
+# TYPE radarr_movie_unmonitored_total gauge
+radarr_movie_unmonitored_total{url="http://fixture"} 1
+# HELP radarr_movie_wanted_total Total number of wanted movies
+# TYPE radarr_movie_wanted_total gauge
+radarr_movie_wanted_total{url="http://fixture"} 1
+# HELP radarr_queue_total Total number of items in the queue by status, download_status, and download_state
+# TYPE radarr_queue_total gauge
+radarr_queue_total{download_state="downloading",download_status="warning",status="completed",url="http://fixture"} 2
+radarr_queue_total{download_state="queued",download_status="ok",status="queued",url="http://fixture"} 1
+# HELP radarr_rootfolder_freespace_bytes Root folder space in bytes by path
+# TYPE radarr_rootfolder_freespace_bytes gauge
+radarr_rootfolder_freespace_bytes{path="/media/books/",url="http://fixture"} 3.2147635175424e+13
+# HELP radarr_scrape_duration_seconds Distribution of scrape durations.
+# TYPE radarr_scrape_duration_seconds histogram
+radarr_scrape_duration_seconds_bucket{url="http://fixture",le="0.1"} X
+radarr_scrape_duration_seconds_bucket{url="http://fixture",le="0.25"} X
+radarr_scrape_duration_seconds_bucket{url="http://fixture",le="0.5"} X
+radarr_scrape_duration_seconds_bucket{url="http://fixture",le="1"} X
+radarr_scrape_duration_seconds_bucket{url="http://fixture",le="2.5"} X
+radarr_scrape_duration_seconds_bucket{url="http://fixture",le="5"} X
+radarr_scrape_duration_seconds_bucket{url="http://fixture",le="10"} X
+radarr_scrape_duration_seconds_bucket{url="http://fixture",le="30"} X
+radarr_scrape_duration_seconds_bucket{url="http://fixture",le="60"} X
+radarr_scrape_duration_seconds_bucket{url="http://fixture",le="+Inf"} X
+radarr_scrape_duration_seconds_sum{url="http://fixture"} X
+radarr_scrape_duration_seconds_count{url="http://fixture"} X
+# HELP radarr_scrape_requests_total Total number of HTTP requests made.
+# TYPE radarr_scrape_requests_total counter
+radarr_scrape_requests_total{code="200",url="http://fixture"} 1
+# HELP radarr_system_health_issues Total number of health issues by source, type, message and wikiurl
+# TYPE radarr_system_health_issues gauge
+radarr_system_health_issues{message="Indexers unavailable due to failures for more than 6 hours: SomeIndexer",source="IndexerLongTermStatusCheck",type="warning",url="http://fixture",wikiurl="https://wiki.servarr.com/sonarr/system#indexers-are-unavailable-due-to-failures"} 1
+# HELP radarr_system_status System Status
+# TYPE radarr_system_status gauge
+radarr_system_status{url="http://fixture"} 1

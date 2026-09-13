@@ -1,0 +1,120 @@
+# HELP bazarr_collector_error Error while collecting metrics
+# TYPE bazarr_collector_error gauge
+bazarr_collector_error{url="http://fixture"} 1
+# HELP bazarr_episode_subtitles_downloaded_total Total number of downloaded episode subtitles
+# TYPE bazarr_episode_subtitles_downloaded_total gauge
+bazarr_episode_subtitles_downloaded_total{url="http://fixture"} 100
+# HELP bazarr_episode_subtitles_filesize_total Total filesize of all episode subtitles
+# TYPE bazarr_episode_subtitles_filesize_total gauge
+bazarr_episode_subtitles_filesize_total{url="http://fixture"} 4.133798e+06
+# HELP bazarr_episode_subtitles_history_total Total number of history episode subtitles
+# TYPE bazarr_episode_subtitles_history_total gauge
+bazarr_episode_subtitles_history_total{url="http://fixture"} 71633
+# HELP bazarr_episode_subtitles_missing_total Total number of missing episode subtitles
+# TYPE bazarr_episode_subtitles_missing_total gauge
+bazarr_episode_subtitles_missing_total{url="http://fixture"} 0
+# HELP bazarr_episode_subtitles_monitored_total Total number of monitored episode subtitles
+# TYPE bazarr_episode_subtitles_monitored_total gauge
+bazarr_episode_subtitles_monitored_total{url="http://fixture"} 16
+# HELP bazarr_episode_subtitles_unmonitored_total Total number of unmonitored episode subtitles
+# TYPE bazarr_episode_subtitles_unmonitored_total gauge
+bazarr_episode_subtitles_unmonitored_total{url="http://fixture"} 84
+# HELP bazarr_episode_subtitles_wanted_total Total number of wanted episode subtitles
+# TYPE bazarr_episode_subtitles_wanted_total gauge
+bazarr_episode_subtitles_wanted_total{url="http://fixture"} 0
+# HELP bazarr_movie_subtitles_downloaded_total Total number of downloaded movie subtitles
+# TYPE bazarr_movie_subtitles_downloaded_total gauge
+bazarr_movie_subtitles_downloaded_total{url="http://fixture"} 10
+# HELP bazarr_movie_subtitles_filesize_total Total filesize of all movie subtitles
+# TYPE bazarr_movie_subtitles_filesize_total gauge
+bazarr_movie_subtitles_filesize_total{url="http://fixture"} 785627
+# HELP bazarr_movie_subtitles_history_total Total number of history movie subtitles
+# TYPE bazarr_movie_subtitles_history_total gauge
+bazarr_movie_subtitles_history_total{url="http://fixture"} 3511
+# HELP bazarr_movie_subtitles_missing_total Total number of missing movie subtitles
+# TYPE bazarr_movie_subtitles_missing_total gauge
+bazarr_movie_subtitles_missing_total{url="http://fixture"} 0
+# HELP bazarr_movie_subtitles_monitored_total Total number of monitored movie subtitles
+# TYPE bazarr_movie_subtitles_monitored_total gauge
+bazarr_movie_subtitles_monitored_total{url="http://fixture"} 10
+# HELP bazarr_movie_subtitles_unmonitored_total Total number of unmonitored movie subtitles
+# TYPE bazarr_movie_subtitles_unmonitored_total gauge
+bazarr_movie_subtitles_unmonitored_total{url="http://fixture"} 0
+# HELP bazarr_movie_subtitles_wanted_total Total number of wanted movie subtitles
+# TYPE bazarr_movie_subtitles_wanted_total gauge
+bazarr_movie_subtitles_wanted_total{url="http://fixture"} 0
+# HELP bazarr_scrape_duration_seconds Distribution of scrape durations.
+# TYPE bazarr_scrape_duration_seconds histogram
+bazarr_scrape_duration_seconds_bucket{url="http://fixture",le="0.1"} X
+bazarr_scrape_duration_seconds_bucket{url="http://fixture",le="0.25"} X
+bazarr_scrape_duration_seconds_bucket{url="http://fixture",le="0.5"} X
+bazarr_scrape_duration_seconds_bucket{url="http://fixture",le="1"} X
+bazarr_scrape_duration_seconds_bucket{url="http://fixture",le="2.5"} X
+bazarr_scrape_duration_seconds_bucket{url="http://fixture",le="5"} X
+bazarr_scrape_duration_seconds_bucket{url="http://fixture",le="10"} X
+bazarr_scrape_duration_seconds_bucket{url="http://fixture",le="30"} X
+bazarr_scrape_duration_seconds_bucket{url="http://fixture",le="60"} X
+bazarr_scrape_duration_seconds_bucket{url="http://fixture",le="+Inf"} X
+bazarr_scrape_duration_seconds_sum{url="http://fixture"} X
+bazarr_scrape_duration_seconds_count{url="http://fixture"} X
+# HELP bazarr_scrape_requests_total Total number of HTTP requests made.
+# TYPE bazarr_scrape_requests_total counter
+bazarr_scrape_requests_total{code="200",url="http://fixture"} 1
+# HELP bazarr_subtitles_downloaded_total Total number of downloaded subtitles
+# TYPE bazarr_subtitles_downloaded_total gauge
+bazarr_subtitles_downloaded_total{url="http://fixture"} 110
+# HELP bazarr_subtitles_filesize_total Total filesize of all subtitles
+# TYPE bazarr_subtitles_filesize_total gauge
+bazarr_subtitles_filesize_total{url="http://fixture"} 4.919425e+06
+# HELP bazarr_subtitles_history_total Total number of history subtitles
+# TYPE bazarr_subtitles_history_total gauge
+bazarr_subtitles_history_total{url="http://fixture"} 75144
+# HELP bazarr_subtitles_language_total Total number of downloaded subtitles by language
+# TYPE bazarr_subtitles_language_total gauge
+bazarr_subtitles_language_total{language="English",url="http://fixture"} 110
+# HELP bazarr_subtitles_missing_total Total number of missing subtitles
+# TYPE bazarr_subtitles_missing_total gauge
+bazarr_subtitles_missing_total{url="http://fixture"} 0
+# HELP bazarr_subtitles_monitored_total Total number of monitored subtitles
+# TYPE bazarr_subtitles_monitored_total gauge
+bazarr_subtitles_monitored_total{url="http://fixture"} 26
+# HELP bazarr_subtitles_provider_total Total number of downloaded subtitles by provider
+# TYPE bazarr_subtitles_provider_total gauge
+bazarr_subtitles_provider_total{provider="opensubtitlescom",url="http://fixture"} 12
+bazarr_subtitles_provider_total{provider="podnapisi",url="http://fixture"} 2
+bazarr_subtitles_provider_total{provider="yifysubtitles",url="http://fixture"} 6
+# HELP bazarr_subtitles_score Distribution of downloaded subtitles scores (percent)
+# TYPE bazarr_subtitles_score histogram
+bazarr_subtitles_score_bucket{url="http://fixture",le="10"} 0
+bazarr_subtitles_score_bucket{url="http://fixture",le="20"} 0
+bazarr_subtitles_score_bucket{url="http://fixture",le="30"} 0
+bazarr_subtitles_score_bucket{url="http://fixture",le="40"} 0
+bazarr_subtitles_score_bucket{url="http://fixture",le="50"} 0
+bazarr_subtitles_score_bucket{url="http://fixture",le="60"} 0
+bazarr_subtitles_score_bucket{url="http://fixture",le="70"} 0
+bazarr_subtitles_score_bucket{url="http://fixture",le="80"} 2
+bazarr_subtitles_score_bucket{url="http://fixture",le="90"} 9
+bazarr_subtitles_score_bucket{url="http://fixture",le="95"} 16
+bazarr_subtitles_score_bucket{url="http://fixture",le="100"} 20
+bazarr_subtitles_score_bucket{url="http://fixture",le="+Inf"} 20
+bazarr_subtitles_score_sum{url="http://fixture"} 1791.4
+bazarr_subtitles_score_count{url="http://fixture"} 20
+# HELP bazarr_subtitles_unmonitored_total Total number of unmonitored subtitles
+# TYPE bazarr_subtitles_unmonitored_total gauge
+bazarr_subtitles_unmonitored_total{url="http://fixture"} 84
+# HELP bazarr_subtitles_wanted_total Total number of wanted subtitles
+# TYPE bazarr_subtitles_wanted_total gauge
+bazarr_subtitles_wanted_total{url="http://fixture"} 0
+# HELP bazarr_system_health_issues Total number of health issues by object and issue
+# TYPE bazarr_system_health_issues gauge
+bazarr_system_health_issues{issue="some/path",object="incorrectly configured!!!",url="http://fixture"} 1
+# HELP bazarr_system_status System Status
+# TYPE bazarr_system_status gauge
+bazarr_system_status{url="http://fixture"} 1
+# HELP exportarr_app_info A metric with a constant '1' value labeled by app name, version, build time, and revision.
+# TYPE exportarr_app_info gauge
+exportarr_app_info{app_name="exportarr",build_time="",revision="",version="development"} 1
+# HELP promhttp_metric_handler_errors_total Total number of internal errors encountered by the promhttp metric handler.
+# TYPE promhttp_metric_handler_errors_total counter
+promhttp_metric_handler_errors_total{cause="encoding"} 0
+promhttp_metric_handler_errors_total{cause="gathering"} 0

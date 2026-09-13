@@ -1,0 +1,3 @@
+level=INFO msg="Shutting down due to signal" signal=terminated
+level=INFO msg="Starting HTTP Server" interface=0.0.0.0 port=9707
+level=INFO msg="Starting exportarr" app_name=exportarr version=development buildTime="" revision=""
