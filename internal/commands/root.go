@@ -13,7 +13,9 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	dto "github.com/prometheus/client_model/go"
 	"github.com/spf13/cobra"
+	"golang.org/x/sync/singleflight"
 
 	"github.com/onedr0p/exportarr/internal/config"
 	"github.com/onedr0p/exportarr/internal/handlers"
@@ -142,34 +144,58 @@ func serveHTTP(fn registerFunc) error {
 	)
 	fn(registry)
 
-	// Serve partial metrics when a collector fails rather than failing the
-	// whole scrape; collectors surface failures via their *_collector_error
-	// gauges. Scrape bookkeeping wraps only /metrics so health probes don't
-	// pollute it.
-	metricsHandler := promhttp.HandlerFor(registry, promhttp.HandlerOpts{
-		ErrorHandling: promhttp.ContinueOnError,
-		ErrorLog:      promhttpLogger{},
-	})
-	mux := http.NewServeMux()
-	mux.Handle("/metrics", handlers.MetricsHandler(conf, registry, metricsHandler))
-	mux.HandleFunc("/", handlers.IndexHandler)
-	mux.HandleFunc("/healthz", handlers.HealthzHandler)
-
 	slog.Info("Starting HTTP Server",
 		"interface", conf.Interface,
 		"port", conf.Port)
 	srv.Addr = fmt.Sprintf("%s:%d", conf.Interface, conf.Port)
-
-	wrappedMux := handlers.RecoveryHandler(mux)
-	wrappedMux = handlers.LogHandler(wrappedMux)
-
-	srv.Handler = wrappedMux
+	srv.Handler = newHandler(conf, registry)
 
 	if err := srv.ListenAndServe(); err != http.ErrServerClosed {
 		return fmt.Errorf("failed to start HTTP server: %w", err)
 	}
 	<-idleConnsClosed
 	return nil
+}
+
+// sharedGatherer lets concurrent scrapes share one in-flight gather, so an
+// overlapping request never stacks another authenticated walk onto the target.
+type sharedGatherer struct {
+	inner prometheus.Gatherer
+	group singleflight.Group
+}
+
+// Gather implements prometheus.Gatherer.
+func (g *sharedGatherer) Gather() ([]*dto.MetricFamily, error) {
+	v, err, _ := g.group.Do("gather", func() (any, error) {
+		return g.inner.Gather()
+	})
+	mfs, _ := v.([]*dto.MetricFamily)
+	return mfs, err
+}
+
+// maxScrapesInFlight bounds concurrent /metrics requests; further requests
+// get a 503 instead of stacking more authenticated walks onto the target.
+const maxScrapesInFlight = 2
+
+func newHandler(conf *config.Config, registry *prometheus.Registry) http.Handler {
+	// Serve partial metrics when a collector fails rather than failing the
+	// whole scrape; collectors surface failures via their *_collector_error
+	// gauges. Scrape bookkeeping wraps only /metrics so health probes don't
+	// pollute it.
+	metricsHandler := promhttp.HandlerFor(&sharedGatherer{inner: registry}, promhttp.HandlerOpts{
+		ErrorHandling:       promhttp.ContinueOnError,
+		ErrorLog:            promhttpLogger{},
+		MaxRequestsInFlight: maxScrapesInFlight,
+		Timeout:             conf.ScrapeTimeout,
+		// Exposes promhttp_metric_handler_errors_total for gather errors.
+		Registry: registry,
+	})
+	mux := http.NewServeMux()
+	mux.Handle("GET /metrics", handlers.MetricsHandler(conf, registry, metricsHandler))
+	mux.HandleFunc("GET /healthz", handlers.HealthzHandler)
+	mux.HandleFunc("GET /", handlers.IndexHandler)
+
+	return handlers.LogHandler(handlers.RecoveryHandler(mux))
 }
 
 func registerAppInfoMetric(registry prometheus.Registerer) {

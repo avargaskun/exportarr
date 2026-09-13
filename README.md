@@ -64,7 +64,7 @@ Visit http://127.0.0.1:9707/metrics to see the app metrics
 |            `LOG_FORMAT`            | `--log-format`                 | Log format (`console`, `json`)                                                                                            | `console`            |    ❌    |
 |        `DISABLE_SSL_VERIFY`        | `--disable-ssl-verify`         | Set to `true` to disable SSL verification                                                                                 | `false`              |    ❌    |
 |         `REQUEST_TIMEOUT`          | `--request-timeout`            | HTTP timeout per request to the target app                                                                                | `60s`                |    ❌    |
-|          `SCRAPE_TIMEOUT`          | `--scrape-timeout`             | Time budget for one scrape; Sonarr/Lidarr stop per-item lookups 5s before it and report partial results                   | `2m`                 |    ❌    |
+|          `SCRAPE_TIMEOUT`          | `--scrape-timeout`             | Time budget for one scrape (`/metrics` answers 503 past it); keep it at or below Prometheus's `scrape_timeout`            | `2m`                 |    ❌    |
 |          `AUTH_PASSWORD`           | `--auth-password`              | Password for form auth                                                                                                    |                      |    ❌    |
 |          `AUTH_USERNAME`           | `--auth-username`              | Username for form auth                                                                                                    |                      |    ❌    |
 |            `FORM_AUTH`             | `--form-auth`                  | Use form-based authentication                                                                                             | `false`              |    ❌    |
@@ -135,7 +135,8 @@ v3 is a breaking release. Review each section before upgrading.
 
 - A failing collector no longer fails the whole scrape with HTTP 500. `/metrics` now returns 200 with everything that succeeded, plus a per-collector error gauge (e.g. `radarr_collector_error`, `radarr_queue_collector_error`) set to `1` for whatever failed. Alerts that relied on the target reporting `up == 0` when the app was down should alert on `*_collector_error > 0` instead.
 - `sabnzbd_collector_error` renamed its `target` label to `url`, matching every other metric.
-- Overlapping collections are skipped: if a scrape arrives while the previous sonarr/lidarr/bazarr collection is still running against a slow instance, exportarr skips it (raising the collector's error gauge) instead of stacking concurrent walks onto the app — the failure mode behind bazarr CPU drainage ([#380](https://github.com/onedr0p/exportarr/issues/380)).
+- Overlapping scrapes never stack walks onto the app, the failure mode behind bazarr CPU drainage ([#380](https://github.com/onedr0p/exportarr/issues/380)): a scrape that arrives while a collection is still running waits for it and is served the same result.
+- `/metrics` serves at most two scrapes at once and answers `503` to any more, and to a scrape that exceeds `SCRAPE_TIMEOUT`. Sonarr and Lidarr stop their per-item lookups shortly before that deadline and raise their error gauge, so the rest of the scrape is still served. Only `GET` (and `HEAD`) is accepted.
 
 ### Changed metrics
 
