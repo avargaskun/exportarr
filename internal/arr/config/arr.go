@@ -57,6 +57,7 @@ type ArrConfig struct {
 	URL                     string         `env:"-"` // from the base config
 	APIKey                  string         `env:"-"` // from the base config
 	DisableSSLVerify        bool           `env:"-"` // from the base config
+	ProxyFromEnv            bool           `env:"-"` // from the base config
 	RequestTimeout          time.Duration  `env:"-"` // from the base config
 	CollectTimeout          time.Duration  `env:"-"` // from the base config
 	Prowlarr                ProwlarrConfig `envPrefix:"PROWLARR__"`
@@ -82,6 +83,7 @@ func LoadArrConfig(conf base_config.Config, flags *flag.FlagSet) (*ArrConfig, er
 		URL:              conf.URL,
 		APIKey:           conf.APIKey,
 		DisableSSLVerify: conf.DisableSSLVerify,
+		ProxyFromEnv:     conf.ProxyFromEnv,
 		RequestTimeout:   conf.RequestTimeout,
 		CollectTimeout:   conf.CollectTimeout(),
 	}

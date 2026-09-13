@@ -208,7 +208,11 @@ type SabnzbdCollector struct {
 // TODO: Add a sab-specific config struct to abstract away the config parsing.
 func NewSabnzbdCollector(config *config.SabnzbdConfig) (*SabnzbdCollector, error) {
 	author := auth.APIKeyAuth{APIKey: config.APIKey}
-	client, err := client.NewClient(config.URL, config.DisableSSLVerify, config.RequestTimeout, author)
+	opts := client.TransportOptions{
+		InsecureSkipVerify:   config.DisableSSLVerify,
+		ProxyFromEnvironment: config.ProxyFromEnv,
+	}
+	client, err := client.NewClient(config.URL, opts, config.RequestTimeout, author)
 	if err != nil {
 		return nil, fmt.Errorf("failed to build client: %w", err)
 	}

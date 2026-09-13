@@ -22,6 +22,14 @@ func TestLoadConfig_Defaults(t *testing.T) {
 	assert.Equal(t, config.Port, 9707)
 	assert.Equal(t, config.Interface, "0.0.0.0")
 	assert.Equal(t, config.ScrapeTimeout, 2*time.Minute)
+	assert.False(t, config.ProxyFromEnv)
+}
+
+func TestLoadConfig_ProxyFromEnv(t *testing.T) {
+	t.Setenv("PROXY_FROM_ENV", "true")
+	config, err := LoadConfig(&pflag.FlagSet{})
+	assert.NoError(t, err)
+	assert.True(t, config.ProxyFromEnv)
 }
 
 func TestLoadConfig_ScrapeTimeout(t *testing.T) {

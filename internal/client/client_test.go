@@ -12,11 +12,19 @@ import (
 
 func TestNewClient(t *testing.T) {
 	u := "http://localhost"
-	c, err := NewClient(u, true, 0, nil)
+	c, err := NewClient(u, TransportOptions{InsecureSkipVerify: true}, 0, nil)
 	assert.NoError(t, err, "NewClient should not return an error")
 	assert.NotNil(t, c, "NewClient should return a client")
 	assert.Equal(t, c.URL.String(), u, "NewClient should set the correct URL")
 	assert.True(t, c.httpClient.Transport.(*ExportarrTransport).inner.(*http.Transport).TLSClientConfig.InsecureSkipVerify)
+}
+
+func TestBaseTransport_Proxy(t *testing.T) {
+	transport := BaseTransport(TransportOptions{}).(*http.Transport)
+	assert.True(t, transport.Proxy == nil, "the environment proxy must be ignored by default")
+
+	transport = BaseTransport(TransportOptions{ProxyFromEnvironment: true}).(*http.Transport)
+	assert.True(t, transport.Proxy != nil, "the environment proxy must be honored when opted in")
 }
 
 func TestDoRequest(t *testing.T) {
@@ -63,7 +71,7 @@ func TestDoRequest(t *testing.T) {
 			}{}
 			expected := target
 			expected.Test = "asdf2"
-			client, err := NewClient(ts.URL, false, 0, nil)
+			client, err := NewClient(ts.URL, TransportOptions{}, 0, nil)
 			if err != nil {
 				panic(err)
 			}
@@ -92,7 +100,7 @@ func TestDoRequest_PanicRecovery(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	client, err := NewClient(ts.URL, false, 0, nil)
+	client, err := NewClient(ts.URL, TransportOptions{}, 0, nil)
 	assert.Nil(t, err, "NewClient should not return an error")
 	assert.NotNil(t, client, "NewClient should return a client")
 
@@ -108,7 +116,7 @@ func TestDoRequest_ResponseTooLarge(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	client, err := NewClient(ts.URL, false, 0, nil)
+	client, err := NewClient(ts.URL, TransportOptions{}, 0, nil)
 	assert.NoError(t, err)
 	client.maxBodyBytes = 1024
 

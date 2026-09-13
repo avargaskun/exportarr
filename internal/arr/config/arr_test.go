@@ -66,6 +66,12 @@ func TestLoadConfig_SeriesConcurrency(t *testing.T) {
 	assert.Equal(t, config.SeriesConcurrency, 2)
 }
 
+func TestLoadConfig_ProxyFromBase(t *testing.T) {
+	config, err := LoadArrConfig(base_config.Config{ProxyFromEnv: true}, testFlagSet())
+	assert.NoError(t, err)
+	assert.True(t, config.ProxyFromEnv)
+}
+
 func TestLoadConfig_CollectTimeoutFromBase(t *testing.T) {
 	config, err := LoadArrConfig(base_config.Config{ScrapeTimeout: time.Minute}, testFlagSet())
 	assert.NoError(t, err)

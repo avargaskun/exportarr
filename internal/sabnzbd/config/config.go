@@ -15,6 +15,7 @@ type SabnzbdConfig struct {
 	URL              string
 	APIKey           string
 	DisableSSLVerify bool
+	ProxyFromEnv     bool
 	RequestTimeout   time.Duration
 	CollectTimeout   time.Duration
 }
@@ -25,6 +26,7 @@ func LoadSabnzbdConfig(conf base_config.Config) (*SabnzbdConfig, error) {
 		URL:              conf.URL,
 		APIKey:           conf.APIKey,
 		DisableSSLVerify: conf.DisableSSLVerify,
+		ProxyFromEnv:     conf.ProxyFromEnv,
 		RequestTimeout:   conf.RequestTimeout,
 		CollectTimeout:   conf.CollectTimeout(),
 	}

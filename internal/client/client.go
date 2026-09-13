@@ -36,8 +36,16 @@ type Client struct {
 // QueryParams holds URL query parameters.
 type QueryParams = url.Values
 
+// TransportOptions configures the transport a client sends requests through.
+type TransportOptions struct {
+	InsecureSkipVerify bool
+	// ProxyFromEnvironment honors HTTP(S)_PROXY/NO_PROXY. Off by default: a
+	// proxy would see the API key, session cookies and form credentials.
+	ProxyFromEnvironment bool
+}
+
 // NewClient method initializes a new *Arr client.
-func NewClient(baseURL string, insecureSkipVerify bool, timeout time.Duration, auth Authenticator) (*Client, error) {
+func NewClient(baseURL string, opts TransportOptions, timeout time.Duration, auth Authenticator) (*Client, error) {
 	if timeout <= 0 {
 		timeout = defaultRequestTimeout
 	}
@@ -53,7 +61,7 @@ func NewClient(baseURL string, insecureSkipVerify bool, timeout time.Duration, a
 				return http.ErrUseLastResponse
 			},
 			Timeout:   timeout,
-			Transport: NewExportarrTransport(BaseTransport(insecureSkipVerify), auth),
+			Transport: NewExportarrTransport(BaseTransport(opts), auth),
 		},
 		URL:          *u,
 		maxBodyBytes: maxResponseBytes,
@@ -147,15 +155,19 @@ func GetContext[T any](ctx context.Context, c *Client, endpoint string, queryPar
 	return out, err
 }
 
-// BaseTransport returns a clone of the default transport, optionally with TLS
-// verification disabled. Cloning keeps the insecure setting scoped to this
-// client instead of mutating the process-wide http.DefaultTransport.
-func BaseTransport(insecureSkipVerify bool) http.RoundTripper {
+// BaseTransport returns a clone of the default transport configured by opts.
+// Cloning keeps these settings scoped to this client instead of mutating the
+// process-wide http.DefaultTransport.
+func BaseTransport(opts TransportOptions) http.RoundTripper {
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	// Every collector in a command scrapes the same host concurrently; the
 	// default of 2 idle conns per host forces constant TLS re-handshakes.
 	transport.MaxIdleConnsPerHost = 16
-	if insecureSkipVerify {
+	transport.Proxy = nil
+	if opts.ProxyFromEnvironment {
+		transport.Proxy = http.ProxyFromEnvironment
+	}
+	if opts.InsecureSkipVerify {
 		transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true} //nolint:gosec // opt-in via --disable-ssl-verify
 	}
 	return transport

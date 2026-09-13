@@ -21,6 +21,7 @@ func RegisterConfigFlags(flags *flag.FlagSet) {
 	flags.StringP("url", "u", "", "URL to *arr instance")
 	flags.StringP("api-key", "a", "", "API Key for *arr instance")
 	flags.Bool("disable-ssl-verify", false, "Disable SSL verification")
+	flags.Bool("proxy-from-env", false, "Send requests to the target app through HTTP_PROXY/HTTPS_PROXY (off by default: the proxy sees the credentials)")
 	flags.StringP("interface", "i", "", "IP address to listen on")
 	flags.IntP("port", "p", 0, "Port to listen on")
 	flags.Duration("request-timeout", 0, "HTTP timeout per request to the target app")
@@ -43,6 +44,7 @@ type Config struct {
 	Port             int           `env:"PORT" envDefault:"9707"`
 	Interface        string        `env:"INTERFACE" envDefault:"0.0.0.0"`
 	DisableSSLVerify bool          `env:"DISABLE_SSL_VERIFY"`
+	ProxyFromEnv     bool          `env:"PROXY_FROM_ENV"`
 	RequestTimeout   time.Duration `env:"REQUEST_TIMEOUT" envDefault:"60s"`
 	ScrapeTimeout    time.Duration `env:"SCRAPE_TIMEOUT" envDefault:"2m"`
 }
@@ -85,6 +87,7 @@ func LoadConfig(flags *flag.FlagSet) (*Config, error) {
 	OverlayFlag(flags, "interface", flags.GetString, &out.Interface)
 	OverlayFlag(flags, "port", flags.GetInt, &out.Port)
 	OverlayFlag(flags, "disable-ssl-verify", flags.GetBool, &out.DisableSSLVerify)
+	OverlayFlag(flags, "proxy-from-env", flags.GetBool, &out.ProxyFromEnv)
 	OverlayFlag(flags, "request-timeout", flags.GetDuration, &out.RequestTimeout)
 	OverlayFlag(flags, "scrape-timeout", flags.GetDuration, &out.ScrapeTimeout)
 

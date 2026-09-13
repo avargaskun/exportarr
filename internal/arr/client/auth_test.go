@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/onedr0p/exportarr/internal/arr/config"
 	base_client "github.com/onedr0p/exportarr/internal/client"
 )
 
@@ -207,4 +208,16 @@ func TestRoundTrip_StatusCodes(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestNewAuth_FormAuthIgnoresEnvironmentProxy(t *testing.T) {
+	auth, err := NewAuth(&config.ArrConfig{
+		URL:          "http://localhost",
+		FormAuth:     true,
+		AuthUsername: "user",
+		AuthPassword: "pass",
+	})
+	assert.NoError(t, err)
+	transport := auth.(*FormAuth).Transport.(*http.Transport)
+	assert.True(t, transport.Proxy == nil, "form auth must not send credentials through an environment proxy")
 }
