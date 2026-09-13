@@ -37,6 +37,13 @@ func TestAuthFlagsRegistered(t *testing.T) {
 	}
 	for _, p := range params {
 		t.Run(p.name, func(t *testing.T) {
+			t.Cleanup(func() {
+				for _, name := range []string{"auth-username", "auth-password"} {
+					f := p.flags.Lookup(name)
+					_ = f.Value.Set(f.DefValue)
+					f.Changed = false
+				}
+			})
 			_ = p.flags.Set("auth-username", "user")
 			_ = p.flags.Set("auth-password", "pass")
 			config, err := config.LoadArrConfig(base_config.Config{}, p.flags)

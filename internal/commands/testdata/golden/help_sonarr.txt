@@ -1,0 +1,32 @@
+Prometheus Exporter for Sonarr.
+
+Usage:
+  exportarr sonarr [flags]
+
+Aliases:
+  sonarr, s
+
+Flags:
+      --auth-password string         Password for form auth
+      --auth-username string         Username for form auth
+      --disable-album-metrics        Skip per-album metrics (lidarr album lookups; ~1 API call per artist each scrape)
+      --disable-episode-metrics      Skip per-episode metrics (sonarr episode monitoring lookups, bazarr episode-subtitle walk; load scales with library size)
+      --disable-history-metrics      Skip the history endpoint; its total forces a full count over the (unprunable) history table, which is slow on multi-year instances
+      --disable-quality-metrics      Skip per-item quality breakdowns (episodefile/trackfile + qualitydefinition lookups; ~1 API call per series/artist each scrape)
+      --disable-wanted-metrics       Skip the wanted/missing and wanted/cutoff endpoints; their totals force full counts, which is slow on very large libraries
+      --enable-unknown-queue-items   Enable unknown queue items
+      --form-auth                    Use form based authentication
+  -h, --help                         help for sonarr
+      --series-concurrency int       Concurrent per-series (sonarr) and per-artist (lidarr) API calls, 1-32 (default 10)
+
+Global Flags:
+  -a, --api-key string             API Key for *arr instance
+      --disable-ssl-verify         Disable SSL verification
+  -i, --interface string           IP address to listen on
+      --log-format string          Log format (console, json) (default "console")
+  -l, --log-level string           Log level (debug, info, warn, error) (default "info")
+  -p, --port int                   Port to listen on
+      --proxy-from-env             Send requests to the target app through HTTP_PROXY/HTTPS_PROXY (off by default: the proxy sees the credentials)
+      --request-timeout duration   HTTP timeout per request to the target app
+      --scrape-timeout duration    Upper bound on one /metrics scrape; keep it at or below Prometheus's scrape_timeout
+  -u, --url string                 URL to *arr instance

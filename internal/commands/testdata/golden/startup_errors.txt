@@ -1,0 +1,114 @@
+=== radarr without url or api key
+args: radarr
+env: (none)
+url is required
+api-key must be a 20-32 character alphanumeric string
+
+=== radarr url with credentials
+args: radarr
+env: API_KEY=abcdef0123456789abcdef0123456789 URL=http://user:pw@host:7878
+url must not contain credentials; use API_KEY_FILE/API_KEY or form auth
+
+=== radarr url with query
+args: radarr
+env: API_KEY=abcdef0123456789abcdef0123456789 URL=http://host:7878/?apikey=x
+url must not contain a query string
+
+=== radarr short api key
+args: radarr
+env: API_KEY=short URL=http://host:7878
+api-key must be a 20-32 character alphanumeric string
+
+=== sonarr series concurrency zero
+args: sonarr
+env: API_KEY=abcdef0123456789abcdef0123456789 SERIES_CONCURRENCY=0 URL=http://host:7878
+series-concurrency must be between 1 and 32
+
+=== sonarr series concurrency not a number
+args: sonarr
+env: API_KEY=abcdef0123456789abcdef0123456789 SERIES_CONCURRENCY=abc URL=http://host:7878
+env: parse error on field "SeriesConcurrency" of type "int": strconv.ParseInt: parsing "abc": invalid syntax
+
+=== lidarr form auth without credentials
+args: lidarr
+env: API_KEY=abcdef0123456789abcdef0123456789 FORM_AUTH=true URL=http://host:7878
+auth-username and auth-password are required when form-auth is set
+
+=== lidarr username without form auth
+args: lidarr
+env: API_KEY=abcdef0123456789abcdef0123456789 AUTH_USERNAME=u URL=http://host:7878
+auth-username/auth-password are only supported with form-auth (basic auth was removed)
+
+=== prowlarr invalid backfill date from env
+args: prowlarr
+env: API_KEY=abcdef0123456789abcdef0123456789 PROWLARR__BACKFILL_SINCE_DATE=2024-13-01 URL=http://host:7878
+backfill-since-date must be in the format YYYY-MM-DD
+
+=== prowlarr invalid backfill date from flag
+args: prowlarr --backfill-since-date 2024-13-01
+env: API_KEY=abcdef0123456789abcdef0123456789 URL=http://host:7878
+backfill-since-date must be in the format YYYY-MM-DD
+
+=== bazarr series batch size zero
+args: bazarr
+env: API_KEY=abcdef0123456789abcdef0123456789 BAZARR__SERIES_BATCH_SIZE=0 URL=http://host:7878
+series-batch-size must be greater than zero
+
+=== sabnzbd without api key
+args: sabnzbd
+env: URL=http://host:8080
+api-key is required
+
+=== sabnzbd url not absolute
+args: sabnzbd
+env: API_KEY=abcdef0123456789abcdef0123456789 URL=not-a-url
+url must be an absolute URL (scheme://host[:port][/path])
+
+=== port zero
+args: radarr
+env: API_KEY=abcdef0123456789abcdef0123456789 PORT=0 URL=http://host:7878
+port is required
+
+=== unknown log level
+args: radarr
+env: API_KEY=abcdef0123456789abcdef0123456789 LOG_LEVEL=verbose URL=http://host:7878
+log-level must be one of: debug, info, warn, error
+
+=== unknown log format
+args: radarr
+env: API_KEY=abcdef0123456789abcdef0123456789 LOG_FORMAT=xml URL=http://host:7878
+log-format must be one of: console, json
+
+=== interface not an ip
+args: radarr
+env: API_KEY=abcdef0123456789abcdef0123456789 INTERFACE=not-an-ip URL=http://host:7878
+interface must be a valid IP address: "not-an-ip"
+
+=== scrape timeout zero
+args: radarr
+env: API_KEY=abcdef0123456789abcdef0123456789 SCRAPE_TIMEOUT=0s URL=http://host:7878
+scrape-timeout must be greater than zero
+
+=== api key file missing
+args: radarr
+env: API_KEY_FILE=/nonexistent/exportarr-key URL=http://host:7878
+env: could not load content of file "/nonexistent/exportarr-key" from variable API_KEY_FILE: open /nonexistent/exportarr-key: no such file or directory
+
+=== sonarr unknown flag
+args: sonarr --bogus
+env: API_KEY=abcdef0123456789abcdef0123456789 URL=http://host:7878
+unknown flag: --bogus
+
+=== every base setting invalid
+args: radarr
+env: API_KEY=abcdef0123456789abcdef0123456789 INTERFACE=not-an-ip LOG_FORMAT=xml LOG_LEVEL=verbose PORT=0 SCRAPE_TIMEOUT=0s URL=http://host:7878
+log-level must be one of: debug, info, warn, error
+log-format must be one of: console, json
+port is required
+scrape-timeout must be greater than zero
+interface must be a valid IP address: "not-an-ip"
+
+=== base error before app error
+args: radarr
+env: PORT=0
+port is required

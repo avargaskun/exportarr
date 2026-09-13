@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"errors"
 	"flag"
 	"maps"
 	"net/http"
@@ -293,6 +294,95 @@ func TestGolden_TargetEnvIgnoredInSingleTargetMode(t *testing.T) {
 			assertGolden(t, goldenPath(g.app, false, ".log"), logs)
 		})
 	}
+}
+
+type startupErrorCase struct {
+	name string
+	args []string
+	env  map[string]string
+}
+
+// withValidTarget adds a well-formed URL and API key, so only the case's own error fires.
+func withValidTarget(env map[string]string) map[string]string {
+	out := map[string]string{"URL": "http://host:7878", "API_KEY": fixtures.APIKey}
+	maps.Copy(out, env)
+	return out
+}
+
+var startupErrorCases = []startupErrorCase{
+	{name: "radarr without url or api key", args: []string{"radarr"}},
+	{name: "radarr url with credentials", args: []string{"radarr"}, env: map[string]string{"URL": "http://user:pw@host:7878", "API_KEY": fixtures.APIKey}}, //nolint:gosec // rejected-credentials fixture
+	{name: "radarr url with query", args: []string{"radarr"}, env: map[string]string{"URL": "http://host:7878/?apikey=x", "API_KEY": fixtures.APIKey}},
+	{name: "radarr short api key", args: []string{"radarr"}, env: map[string]string{"URL": "http://host:7878", "API_KEY": "short"}},
+	{name: "sonarr series concurrency zero", args: []string{"sonarr"}, env: withValidTarget(map[string]string{"SERIES_CONCURRENCY": "0"})},
+	{name: "sonarr series concurrency not a number", args: []string{"sonarr"}, env: withValidTarget(map[string]string{"SERIES_CONCURRENCY": "abc"})},
+	{name: "lidarr form auth without credentials", args: []string{"lidarr"}, env: withValidTarget(map[string]string{"FORM_AUTH": "true"})},
+	{name: "lidarr username without form auth", args: []string{"lidarr"}, env: withValidTarget(map[string]string{"AUTH_USERNAME": "u"})},
+	{name: "prowlarr invalid backfill date from env", args: []string{"prowlarr"}, env: withValidTarget(map[string]string{"PROWLARR__BACKFILL_SINCE_DATE": "2024-13-01"})},
+	{name: "prowlarr invalid backfill date from flag", args: []string{"prowlarr", "--backfill-since-date", "2024-13-01"}, env: withValidTarget(nil)},
+	{name: "bazarr series batch size zero", args: []string{"bazarr"}, env: withValidTarget(map[string]string{"BAZARR__SERIES_BATCH_SIZE": "0"})},
+	{name: "sabnzbd without api key", args: []string{"sabnzbd"}, env: map[string]string{"URL": "http://host:8080"}},
+	{name: "sabnzbd url not absolute", args: []string{"sabnzbd"}, env: map[string]string{"URL": "not-a-url", "API_KEY": fixtures.APIKey}},
+	{name: "port zero", args: []string{"radarr"}, env: withValidTarget(map[string]string{"PORT": "0"})},
+	{name: "unknown log level", args: []string{"radarr"}, env: withValidTarget(map[string]string{"LOG_LEVEL": "verbose"})},
+	{name: "unknown log format", args: []string{"radarr"}, env: withValidTarget(map[string]string{"LOG_FORMAT": "xml"})},
+	{name: "interface not an ip", args: []string{"radarr"}, env: withValidTarget(map[string]string{"INTERFACE": "not-an-ip"})},
+	{name: "scrape timeout zero", args: []string{"radarr"}, env: withValidTarget(map[string]string{"SCRAPE_TIMEOUT": "0s"})},
+	{name: "api key file missing", args: []string{"radarr"}, env: map[string]string{"URL": "http://host:7878", "API_KEY_FILE": "/nonexistent/exportarr-key"}},
+	{name: "sonarr unknown flag", args: []string{"sonarr", "--bogus"}, env: withValidTarget(nil)},
+	{name: "every base setting invalid", args: []string{"radarr"}, env: withValidTarget(map[string]string{
+		"PORT": "0", "LOG_LEVEL": "verbose", "LOG_FORMAT": "xml", "INTERFACE": "not-an-ip", "SCRAPE_TIMEOUT": "0s",
+	})},
+	{name: "base error before app error", args: []string{"radarr"}, env: map[string]string{"PORT": "0"}},
+}
+
+func renderStartupError(c startupErrorCase, err error) string {
+	env := "(none)"
+	if len(c.env) > 0 {
+		var pairs []string
+		for _, k := range slices.Sorted(maps.Keys(c.env)) {
+			pairs = append(pairs, k+"="+c.env[k])
+		}
+		env = strings.Join(pairs, " ")
+	}
+	msg := "(no error)"
+	if err != nil {
+		msg = err.Error()
+	}
+	return "=== " + c.name + "\nargs: " + strings.Join(c.args, " ") + "\nenv: " + env + "\n" + msg + "\n"
+}
+
+func TestGolden_StartupErrors(t *testing.T) {
+	var blocks []string
+	for _, c := range startupErrorCases {
+		t.Run(c.name, func(t *testing.T) {
+			res := runCommandOutput(t, c.env, c.args...)
+			if res.Err == nil {
+				t.Errorf("expected a startup error")
+			} else {
+				assert.True(t, strings.HasPrefix(res.Out, "Error: "+res.Err.Error()+"\n"), "cobra output %q", res.Out)
+			}
+			blocks = append(blocks, renderStartupError(c, res.Err))
+		})
+	}
+	compareGolden(t, filepath.Join(goldenDir, "startup_errors.txt"), strings.Join(blocks, "\n"))
+}
+
+func TestGolden_Help(t *testing.T) {
+	for _, g := range goldenApps {
+		t.Run(g.app, func(t *testing.T) {
+			res := runCommandOutput(t, nil, g.app, "--help")
+			assert.NoError(t, res.Err)
+			assert.Equal(t, res.Logs, "")
+			compareGolden(t, filepath.Join(goldenDir, "help_"+g.app+".txt"), res.Out)
+		})
+	}
+}
+
+func TestRenderStartupError(t *testing.T) {
+	c := startupErrorCase{name: "n", args: []string{"radarr", "--x"}, env: map[string]string{"B": "2", "A": "1"}}
+	assert.Equal(t, renderStartupError(c, errors.New("boom\nbang")), "=== n\nargs: radarr --x\nenv: A=1 B=2\nboom\nbang\n")
+	assert.Equal(t, renderStartupError(startupErrorCase{name: "m", args: []string{"sonarr"}}, nil), "=== m\nargs: sonarr\nenv: (none)\n(no error)\n")
 }
 
 func TestNormalizeMetrics(t *testing.T) {

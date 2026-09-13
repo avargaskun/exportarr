@@ -1,0 +1,22 @@
+Prometheus Exporter for Sabnzbd.
+
+Usage:
+  exportarr sabnzbd [flags]
+
+Aliases:
+  sabnzbd, sab
+
+Flags:
+  -h, --help   help for sabnzbd
+
+Global Flags:
+  -a, --api-key string             API Key for *arr instance
+      --disable-ssl-verify         Disable SSL verification
+  -i, --interface string           IP address to listen on
+      --log-format string          Log format (console, json) (default "console")
+  -l, --log-level string           Log level (debug, info, warn, error) (default "info")
+  -p, --port int                   Port to listen on
+      --proxy-from-env             Send requests to the target app through HTTP_PROXY/HTTPS_PROXY (off by default: the proxy sees the credentials)
+      --request-timeout duration   HTTP timeout per request to the target app
+      --scrape-timeout duration    Upper bound on one /metrics scrape; keep it at or below Prometheus's scrape_timeout
+  -u, --url string                 URL to *arr instance
