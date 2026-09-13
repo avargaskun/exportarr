@@ -110,11 +110,20 @@ func (promhttpLogger) Println(v ...any) {
 
 type registerFunc func(registry prometheus.Registerer)
 
-func serveHTTP(fn registerFunc) error {
-	srv := http.Server{
-		// Bound header reads so a stalled client cannot pin connections open.
+// newServer bounds every phase of a connection so a stalled or slow client
+// cannot pin it open. Writes get the scrape budget plus a margin, so a scrape
+// that times out can still deliver its 503.
+func newServer(conf *config.Config) *http.Server {
+	return &http.Server{
 		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      conf.ScrapeTimeout + 10*time.Second,
+		IdleTimeout:       60 * time.Second,
 	}
+}
+
+func serveHTTP(fn registerFunc) error {
+	srv := newServer(conf)
 
 	idleConnsClosed := make(chan struct{})
 	go func() {

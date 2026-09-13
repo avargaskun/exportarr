@@ -137,3 +137,11 @@ func TestHandler_ScrapeTimeout(t *testing.T) {
 	assert.Equal(t, code, http.StatusServiceUnavailable)
 	assert.True(t, strings.Contains(body, "timeout"), "unexpected body %q", body)
 }
+
+func TestServerTimeouts(t *testing.T) {
+	srv := newServer(&config.Config{ScrapeTimeout: 2 * time.Minute})
+	assert.Equal(t, srv.ReadHeaderTimeout, 10*time.Second)
+	assert.Equal(t, srv.ReadTimeout, 30*time.Second)
+	assert.Equal(t, srv.IdleTimeout, 60*time.Second)
+	assert.True(t, srv.WriteTimeout > 2*time.Minute, "WriteTimeout %s must exceed the scrape timeout", srv.WriteTimeout)
+}
