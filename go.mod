@@ -1,6 +1,6 @@
 module github.com/onedr0p/exportarr
 
-go 1.26.4
+go 1.26.8
 
 require (
 	github.com/caarlos0/env/v11 v11.4.1

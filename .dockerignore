@@ -1,6 +1,12 @@
 .git
 .github/
 .gitignore
+.mise/
+.env*
 Dockerfile
 LICENSE
 README.md
+examples/
+go.work*
+vendor/
+**/testdata

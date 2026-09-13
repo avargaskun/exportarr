@@ -50,3 +50,38 @@ jobs:
       - name: Run unit tests
         run: go test -race ./...
 
+
+  image:
+    name: Container image
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+
+      - name: Setup Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - name: Build image
+        run: docker build --tag exportarr:ci .
+
+      - name: Verify image
+        run: |
+          entrypoint=$(docker image inspect exportarr:ci --format '{{json .Config.Entrypoint}}')
+          user=$(docker image inspect exportarr:ci --format '{{.Config.User}}')
+          echo "entrypoint=$entrypoint user=$user"
+          test "$entrypoint" = '["/exportarr"]'
+          test "$user" = "65532:65532"
+          id=$(docker create exportarr:ci)
+          docker cp "$id:/exportarr" "$RUNNER_TEMP/exportarr"
+          docker rm "$id"
+          # Fails on a packed binary: UPX hides .go.buildinfo.
+          go version -m "$RUNNER_TEMP/exportarr"
+          docker run --rm exportarr:ci --help

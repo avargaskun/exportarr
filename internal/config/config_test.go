@@ -18,7 +18,7 @@ func TestLoadConfig_Defaults(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, config.LogLevel, "info")
 	assert.Equal(t, config.LogFormat, "console")
-	assert.Equal(t, config.Port, 8081)
+	assert.Equal(t, config.Port, 9707)
 	assert.Equal(t, config.Interface, "0.0.0.0")
 }
 
