@@ -25,6 +25,7 @@ type Queue struct {
 
 // QueueRecords - Stores struct of JSON response
 type QueueRecords struct {
+	ID                    int     `json:"id"`
 	Size                  float64 `json:"size"`
 	Title                 string  `json:"title"`
 	Status                string  `json:"status"`
