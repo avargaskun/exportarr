@@ -152,3 +152,26 @@ func TestDoRequest_RedactsURLInErrorsAndLogs(t *testing.T) {
 	assert.Contains(t, logs.String(), addr+"/base/queue")
 	assert.NotContains(t, logs.String(), "hunter2")
 }
+
+type panicOnDecode struct{}
+
+func (*panicOnDecode) UnmarshalJSON([]byte) error { panic("boom") }
+
+func TestDoRequest_PanicDoesNotLogBody(t *testing.T) {
+	var logs bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	defer slog.SetDefault(prev)
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = fmt.Fprintf(w, "{}\n{\"password\":\"%stracker-secret\"}", strings.Repeat("x", 64<<10))
+	}))
+	defer ts.Close()
+
+	client, err := NewClient(ts.URL, TransportOptions{}, 0, nil)
+	assert.NoError(t, err)
+	err = client.DoRequest("indexer", &panicOnDecode{})
+	assert.Error(t, err)
+	assert.Contains(t, logs.String(), "Recovered while unmarshalling response")
+	assert.NotContains(t, logs.String(), "tracker-secret")
+}

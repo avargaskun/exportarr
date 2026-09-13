@@ -12,7 +12,6 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
-	"strings"
 	"time"
 )
 
@@ -71,19 +70,10 @@ func NewClient(baseURL string, opts TransportOptions, timeout time.Duration, aut
 func (c *Client) unmarshalBody(b io.Reader, target any) (err error) {
 	defer func() {
 		if r := recover(); r != nil {
-			// return recovered panic as error
+			// Never log the body: responses such as prowlarr's indexer list
+			// carry credentials.
 			err = fmt.Errorf("recovered from panic: %s", r)
-
-			log := slog.Default()
-			if log.Enabled(context.Background(), slog.LevelDebug) {
-				s := new(strings.Builder)
-				if _, copyErr := io.Copy(s, b); copyErr != nil {
-					log.Error("Failed to copy body to string in recover",
-						"error", copyErr, "recover", r)
-				}
-				log = log.With("body", s.String())
-			}
-			log.Error("Recovered while unmarshalling response", "error", r)
+			slog.Error("Recovered while unmarshalling response", "error", r)
 		}
 	}()
 	err = json.NewDecoder(b).Decode(target)
