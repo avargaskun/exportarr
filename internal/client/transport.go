@@ -6,6 +6,7 @@ import (
 	"io"
 	"math/rand/v2"
 	"net/http"
+	"sync"
 	"time"
 )
 
@@ -107,6 +108,42 @@ func (t *ExportarrTransport) RoundTrip(req *http.Request) (*http.Response, error
 		return nil, fmt.Errorf("received Redirect Status Code: %d, ", resp.StatusCode)
 	}
 	return resp, nil
+}
+
+// limitedTransport holds a limiter slot for each attempt until the response
+// body is closed.
+type limitedTransport struct {
+	inner   http.RoundTripper
+	limiter Limiter
+}
+
+// RoundTrip implements http.RoundTripper.
+func (t *limitedTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	release, err := t.limiter.Acquire(req.Context())
+	if err != nil {
+		return nil, err
+	}
+	resp, err := t.inner.RoundTrip(req)
+	if err != nil {
+		release()
+		return nil, err
+	}
+	resp.Body = &releasingBody{ReadCloser: resp.Body, release: release}
+	return resp, nil
+}
+
+// releasingBody releases its limiter slot once the body is closed.
+type releasingBody struct {
+	io.ReadCloser
+	release func()
+	once    sync.Once
+}
+
+// Close closes the body, then releases the slot (only on the first call).
+func (b *releasingBody) Close() error {
+	err := b.ReadCloser.Close()
+	b.once.Do(b.release)
+	return err
 }
 
 // drainBody discards and closes a response body so the underlying connection

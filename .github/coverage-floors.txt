@@ -5,7 +5,7 @@ github.com/onedr0p/exportarr/internal/arr/collector 92
 github.com/onedr0p/exportarr/internal/arr/config 98
 github.com/onedr0p/exportarr/internal/arr/model 85
 github.com/onedr0p/exportarr/internal/assert -
-github.com/onedr0p/exportarr/internal/client 96
+github.com/onedr0p/exportarr/internal/client 97
 github.com/onedr0p/exportarr/internal/commands 96
 github.com/onedr0p/exportarr/internal/config 100
 github.com/onedr0p/exportarr/internal/fixtures 100

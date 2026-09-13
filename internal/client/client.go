@@ -41,6 +41,8 @@ type TransportOptions struct {
 	// ProxyFromEnvironment honors HTTP(S)_PROXY/NO_PROXY. Off by default: a
 	// proxy would see the API key, session cookies and form credentials.
 	ProxyFromEnvironment bool
+	// Limiter caps concurrent upstream attempts; nil means unlimited.
+	Limiter Limiter
 }
 
 // NewClient method initializes a new *Arr client.
@@ -156,9 +158,9 @@ func RedactURL(u *url.URL) string {
 	return (&url.URL{Scheme: u.Scheme, Host: u.Host, Path: u.Path}).String()
 }
 
-// BaseTransport returns a clone of the default transport configured by opts.
-// Cloning keeps these settings scoped to this client instead of mutating the
-// process-wide http.DefaultTransport.
+// BaseTransport returns a clone of the default transport configured by opts,
+// wrapped in the limiter when one is set. Cloning keeps these settings scoped
+// to this client instead of mutating the process-wide http.DefaultTransport.
 func BaseTransport(opts TransportOptions) http.RoundTripper {
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	// Every collector in a command scrapes the same host concurrently; the
@@ -171,5 +173,8 @@ func BaseTransport(opts TransportOptions) http.RoundTripper {
 	if opts.InsecureSkipVerify {
 		transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true} //nolint:gosec // opt-in via --disable-ssl-verify
 	}
-	return transport
+	if opts.Limiter == nil {
+		return transport
+	}
+	return &limitedTransport{inner: transport, limiter: opts.Limiter}
 }
