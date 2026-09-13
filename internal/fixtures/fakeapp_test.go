@@ -273,6 +273,7 @@ func TestFakeApp_ReleasedByCleanup(t *testing.T) {
 func TestFakeApp_FormAuth(t *testing.T) {
 	creds := &FormAuthCreds{Username: "admin", Password: "s3cret"}
 	f := NewFakeApp(t, FakeAppOptions{App: "radarr", APIKey: APIKey, FormAuth: creds})
+	assert.True(t, f.HasFormAuth())
 	form := func(user, pass string) io.Reader {
 		return strings.NewReader(url.Values{"username": {user}, "password": {pass}}.Encode())
 	}
@@ -307,6 +308,7 @@ func TestFakeApp_FormAuth(t *testing.T) {
 
 func TestFakeApp_LoginNeedsFormAuth(t *testing.T) {
 	f := NewFakeApp(t, FakeAppOptions{App: "radarr", APIKey: APIKey})
+	assert.False(t, f.HasFormAuth())
 	resp := send(t, http.MethodPost, f.URL+"/login", nil, strings.NewReader("username=a&password=b"))
 	assert.Equal(t, resp.code, http.StatusUnauthorized)
 	assert.Equal(t, f.Logins(), 0)

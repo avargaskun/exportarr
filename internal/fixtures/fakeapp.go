@@ -162,6 +162,9 @@ func (f *FakeApp) InFlight() int64 { return f.inFlight.Current() }
 // PeakInFlight returns the most requests this fake handled at once.
 func (f *FakeApp) PeakInFlight() int64 { return f.inFlight.Peak() }
 
+// HasFormAuth reports whether the fake serves a login form.
+func (f *FakeApp) HasFormAuth() bool { return f.opts.FormAuth != nil }
+
 // Logins returns the number of successful form logins.
 func (f *FakeApp) Logins() int {
 	f.mu.Lock()
