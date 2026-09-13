@@ -2,14 +2,19 @@ package commands
 
 import (
 	"bytes"
+	"context"
+	"errors"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 
@@ -214,4 +219,142 @@ func TestHandler_DoesNotServeDebugEndpoints(t *testing.T) {
 		assert.NotContains(t, body, "cmdline")
 		assert.NotContains(t, body, "goroutine")
 	}
+}
+
+func useServeHooks(t *testing.T, listenFn func(network, address string) (net.Listener, error)) (logs *syncBuffer, sigcc chan chan<- os.Signal) {
+	t.Helper()
+	saveLogging(t)
+	savedConf, savedListen, savedNotify := conf, listen, notifySignals
+	t.Cleanup(func() { conf, listen, notifySignals = savedConf, savedListen, savedNotify })
+
+	logs = &syncBuffer{}
+	sigcc = make(chan chan<- os.Signal, 1)
+	slog.SetDefault(slog.New(slog.NewTextHandler(logs, nil)))
+	conf = &config.Config{App: "test", URL: "http://target", Interface: "127.0.0.1", Port: 9707, ScrapeTimeout: time.Minute}
+	listen = listenFn
+	notifySignals = func(c chan<- os.Signal, sig ...os.Signal) {
+		if !slices.Equal(sig, []os.Signal{os.Interrupt, syscall.SIGTERM}) {
+			t.Errorf("notifySignals got %v", sig)
+		}
+		sigcc <- c
+	}
+	return logs, sigcc
+}
+
+func loopbackListen() (func(string, string) (net.Listener, error), chan string) {
+	addrc := make(chan string, 1)
+	return func(network, _ string) (net.Listener, error) {
+		ln, err := net.Listen(network, "127.0.0.1:0")
+		if err == nil {
+			addrc <- ln.Addr().String()
+		}
+		return ln, err
+	}, addrc
+}
+
+func noCollectors(prometheus.Registerer) {}
+
+func startServeHTTP(ctx context.Context, fn registerFunc) chan error {
+	errc := make(chan error, 1)
+	go func() { errc <- serveHTTP(ctx, fn) }()
+	return errc
+}
+
+func waitErr(t *testing.T, errc chan error) error {
+	t.Helper()
+	select {
+	case err := <-errc:
+		return err
+	case <-time.After(10 * time.Second):
+		t.Fatal("serveHTTP did not return within 10s")
+		return nil
+	}
+}
+
+func TestServeHTTP_ListenError(t *testing.T) {
+	logs, _ := useServeHooks(t, func(string, string) (net.Listener, error) {
+		return nil, errors.New("address in use")
+	})
+	err := serveHTTP(context.Background(), noCollectors)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to start HTTP server: address in use")
+	assert.Contains(t, logs.String(), "Starting HTTP Server")
+}
+
+func TestServeHTTP_ClosedListener(t *testing.T) {
+	useServeHooks(t, func(network, _ string) (net.Listener, error) {
+		ln, err := net.Listen(network, "127.0.0.1:0")
+		if err != nil {
+			return nil, err
+		}
+		_ = ln.Close()
+		return ln, nil
+	})
+	err := serveHTTP(context.Background(), noCollectors)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to start HTTP server")
+}
+
+func TestServeHTTP_ContextCancelled(t *testing.T) {
+	listenFn, addrc := loopbackListen()
+	logs, _ := useServeHooks(t, listenFn)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	errc := startServeHTTP(ctx, noCollectors)
+	addr := <-addrc
+	code, body := get(t, http.MethodGet, "http://"+addr+"/healthz")
+	assert.Equal(t, code, http.StatusOK)
+	assert.Equal(t, body, "OK")
+
+	cancel()
+	assert.NoError(t, waitErr(t, errc))
+	assert.NotContains(t, logs.String(), "Shutting down")
+}
+
+func TestServeHTTP_Signal(t *testing.T) {
+	listenFn, addrc := loopbackListen()
+	logs, sigcc := useServeHooks(t, listenFn)
+
+	errc := startServeHTTP(context.Background(), noCollectors)
+	<-addrc
+	(<-sigcc) <- os.Interrupt
+	assert.NoError(t, waitErr(t, errc))
+	assert.Contains(t, logs.String(), `msg="Shutting down due to signal" signal=interrupt`)
+}
+
+func TestServeHTTP_GracefulShutdownFailure(t *testing.T) {
+	listenFn, addrc := loopbackListen()
+	logs, _ := useServeHooks(t, listenFn)
+	savedTimeout := gracefulTimeout
+	gracefulTimeout = 50 * time.Millisecond
+	t.Cleanup(func() { gracefulTimeout = savedTimeout })
+
+	blocking := newBlockingCollector()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	errc := startServeHTTP(ctx, func(r prometheus.Registerer) { r.MustRegister(blocking) })
+	addr := <-addrc
+
+	scraped := make(chan int, 1)
+	go func() {
+		resp, err := http.Get("http://" + addr + "/metrics")
+		if err != nil {
+			scraped <- 0
+			return
+		}
+		_, _ = io.Copy(io.Discard, resp.Body)
+		_ = resp.Body.Close()
+		scraped <- resp.StatusCode
+	}()
+	<-blocking.started
+
+	cancel()
+	err := waitErr(t, errc)
+	assert.Error(t, err)
+	assert.True(t, errors.Is(err, context.DeadlineExceeded), "unexpected error %v", err)
+	assert.Contains(t, logs.String(), `msg="Server shutdown failed"`)
+
+	close(blocking.release)
+	assert.Equal(t, <-scraped, http.StatusOK)
 }

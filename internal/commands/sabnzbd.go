@@ -16,7 +16,7 @@ var sabnzbdCmd = &cobra.Command{
 	Aliases: []string{"sab"},
 	Short:   "Prometheus Exporter for Sabnzbd",
 	Long:    "Prometheus Exporter for Sabnzbd.",
-	RunE: func(_ *cobra.Command, _ []string) error {
+	RunE: func(cmd *cobra.Command, _ []string) error {
 		c, err := config.LoadSabnzbdConfig(*conf)
 		if err != nil {
 			return err
@@ -29,7 +29,7 @@ var sabnzbdCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		return serveHTTP(func(r prometheus.Registerer) {
+		return serveHTTP(cmd.Context(), func(r prometheus.Registerer) {
 			r.MustRegister(collector)
 		})
 	},

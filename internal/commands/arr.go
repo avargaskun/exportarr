@@ -64,7 +64,7 @@ func (a arrCommand) runE(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
-	return serveHTTP(func(r prometheus.Registerer) {
+	return serveHTTP(cmd.Context(), func(r prometheus.Registerer) {
 		r.MustRegister(a.collectors(httpClient, c)...)
 	})
 }

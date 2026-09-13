@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -25,9 +26,13 @@ import (
 	"github.com/onedr0p/exportarr/internal/handlers"
 )
 
-const gracefulTimeout = 5 * time.Second
-
 var (
+	gracefulTimeout = 5 * time.Second
+
+	listen                  = net.Listen
+	logOutput     io.Writer = os.Stdout
+	notifySignals           = signal.Notify
+
 	conf    = &config.Config{}
 	appInfo = &AppInfo{}
 	rootCmd = &cobra.Command{
@@ -88,9 +93,9 @@ func initLogger() {
 	// lower/raise the level once the configured value parses.
 	lvl := new(slog.LevelVar)
 
-	var handler slog.Handler = slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: lvl})
+	var handler slog.Handler = slog.NewTextHandler(logOutput, &slog.HandlerOptions{Level: lvl})
 	if conf.LogFormat == "json" {
-		handler = slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: lvl})
+		handler = slog.NewJSONHandler(logOutput, &slog.HandlerOptions{Level: lvl})
 	}
 	slog.SetDefault(slog.New(handler))
 
@@ -144,26 +149,12 @@ func newServer(conf *config.Config) *http.Server {
 	}
 }
 
-func serveHTTP(fn registerFunc) error {
+func serveHTTP(ctx context.Context, fn registerFunc) error {
+	sigc := make(chan os.Signal, 1)
+	notifySignals(sigc, os.Interrupt, syscall.SIGTERM)
+	defer signal.Stop(sigc)
+
 	srv := newServer(conf)
-
-	idleConnsClosed := make(chan struct{})
-	go func() {
-		sigchan := make(chan os.Signal, 1)
-		signal.Notify(sigchan, os.Interrupt)
-		signal.Notify(sigchan, syscall.SIGTERM)
-		sig := <-sigchan
-		slog.Info("Shutting down due to signal", "signal", sig.String())
-
-		ctx, cancel := context.WithTimeout(context.Background(), gracefulTimeout)
-		defer cancel()
-
-		if err := srv.Shutdown(ctx); err != nil {
-			slog.Error("Server shutdown failed", "error", err)
-			os.Exit(1)
-		}
-		close(idleConnsClosed)
-	}()
 
 	registry := prometheus.NewRegistry()
 	registerAppInfoMetric(registry)
@@ -178,13 +169,29 @@ func serveHTTP(fn registerFunc) error {
 	slog.Info("Starting HTTP Server",
 		"interface", conf.Interface,
 		"port", conf.Port)
-	srv.Addr = listenAddr(conf)
 	srv.Handler = newHandler(conf, registry)
 
-	if err := srv.ListenAndServe(); err != http.ErrServerClosed {
+	ln, err := listen("tcp", listenAddr(conf))
+	if err != nil {
 		return fmt.Errorf("failed to start HTTP server: %w", err)
 	}
-	<-idleConnsClosed
+	errc := make(chan error, 1)
+	go func() { errc <- srv.Serve(ln) }()
+
+	select {
+	case err := <-errc:
+		return fmt.Errorf("failed to start HTTP server: %w", err)
+	case sig := <-sigc:
+		slog.Info("Shutting down due to signal", "signal", sig.String())
+	case <-ctx.Done():
+	}
+
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), gracefulTimeout)
+	defer cancel()
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		slog.Error("Server shutdown failed", "error", err)
+		return err
+	}
 	return nil
 }
 
