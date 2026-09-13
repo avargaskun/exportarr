@@ -54,17 +54,18 @@ jobs:
       publish: ${{ steps.resolve.outputs.publish }}
       ref: ${{ steps.resolve.outputs.ref }}
       version: ${{ steps.resolve.outputs.version }}
-      minor: ${{ steps.resolve.outputs.minor }}
-      major: ${{ steps.resolve.outputs.major }}
+      tags: ${{ steps.resolve.outputs.tags }}
     steps:
       - name: Resolve version
         id: resolve
+        shell: bash
         env:
           EVENT_NAME: ${{ github.event_name }}
           INPUT_TAG: ${{ inputs.tag }}
           RELEASE_CREATED: ${{ needs.release-please.outputs.release_created }}
           RELEASE_TAG: ${{ needs.release-please.outputs.tag_name }}
           SHA: ${{ github.sha }}
+          REPO_URL: ${{ github.server_url }}/${{ github.repository }}.git
         run: |
           if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
             tag="$INPUT_TAG"
@@ -79,12 +80,30 @@ jobs:
             echo "::error::Not a release tag: $tag"
             exit 1
           fi
+          version="${BASH_REMATCH[1]}"
+          major="${BASH_REMATCH[2]}"
+          minor="$major.${BASH_REMATCH[3]}"
+
+          # Floating tags only move forward, so re-publishing an older release
+          # never repoints latest, X or X.Y at it.
+          releases=$(
+            { git ls-remote --tags --refs "$REPO_URL"; echo "refs/tags/$tag"; } |
+              sed -n 's|.*refs/tags/v\([0-9]*\.[0-9]*\.[0-9]*\)$|\1|p' | sort -uV
+          )
+          highest() { awk -v prefix="$1" 'index($0, prefix) == 1' <<< "$releases" | tail -n 1; }
+          tags="$IMAGE:$version"
+          if [[ "$(highest "$minor.")" == "$version" ]]; then tags+=$'\n'"$IMAGE:$minor"; fi
+          if [[ "$(highest "$major.")" == "$version" ]]; then tags+=$'\n'"$IMAGE:$major"; fi
+          if [[ "$(highest "")" == "$version" ]]; then tags+=$'\n'"$IMAGE:latest"; fi
+          echo "$tags"
+
           {
             echo "publish=true"
             echo "ref=refs/tags/$tag"
-            echo "version=${BASH_REMATCH[1]}"
-            echo "minor=${BASH_REMATCH[2]}.${BASH_REMATCH[3]}"
-            echo "major=${BASH_REMATCH[2]}"
+            echo "version=$version"
+            echo "tags<<EOF"
+            echo "$tags"
+            echo "EOF"
           } >> "$GITHUB_OUTPUT"
 
   tests:
@@ -158,8 +177,4 @@ jobs:
             org.opencontainers.image.version=${{ needs.version.outputs.version }}
             org.opencontainers.image.revision=${{ steps.commit.outputs.revision }}
             org.opencontainers.image.created=${{ steps.commit.outputs.created }}
-          tags: |
-            ${{ env.IMAGE }}:${{ needs.version.outputs.version }}
-            ${{ env.IMAGE }}:${{ needs.version.outputs.minor }}
-            ${{ env.IMAGE }}:${{ needs.version.outputs.major }}
-            ${{ env.IMAGE }}:latest
+          tags: ${{ needs.version.outputs.tags }}
