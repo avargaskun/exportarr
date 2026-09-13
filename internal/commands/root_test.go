@@ -168,3 +168,14 @@ func TestWarnSecretFlags(t *testing.T) {
 	assert.Contains(t, logs.String(), "flag=--auth-password")
 	assert.NotContains(t, logs.String(), "hunter2")
 }
+
+func TestListenAddr(t *testing.T) {
+	for _, tc := range []struct{ iface, want string }{
+		{"0.0.0.0", "0.0.0.0:9707"},
+		{"127.0.0.1", "127.0.0.1:9707"},
+		{"::1", "[::1]:9707"},
+		{"::", "[::]:9707"},
+	} {
+		assert.Equal(t, listenAddr(&config.Config{Interface: tc.iface, Port: 9707}), tc.want)
+	}
+}

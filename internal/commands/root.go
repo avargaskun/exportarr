@@ -4,9 +4,11 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -170,7 +172,7 @@ func serveHTTP(fn registerFunc) error {
 	slog.Info("Starting HTTP Server",
 		"interface", conf.Interface,
 		"port", conf.Port)
-	srv.Addr = fmt.Sprintf("%s:%d", conf.Interface, conf.Port)
+	srv.Addr = listenAddr(conf)
 	srv.Handler = newHandler(conf, registry)
 
 	if err := srv.ListenAndServe(); err != http.ErrServerClosed {
@@ -178,6 +180,11 @@ func serveHTTP(fn registerFunc) error {
 	}
 	<-idleConnsClosed
 	return nil
+}
+
+// listenAddr joins the interface and port, bracketing IPv6 addresses.
+func listenAddr(conf *config.Config) string {
+	return net.JoinHostPort(conf.Interface, strconv.Itoa(conf.Port))
 }
 
 // sharedGatherer lets concurrent scrapes share one in-flight gather, so an
