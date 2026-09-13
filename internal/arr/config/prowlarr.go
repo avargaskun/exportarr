@@ -14,9 +14,9 @@ const backfillDateFormat = "2006-01-02"
 
 // ProwlarrConfig holds prowlarr-specific exporter options.
 type ProwlarrConfig struct {
-	Backfill          bool   `env:"BACKFILL"`
-	BackfillSinceDate string `env:"BACKFILL_SINCE_DATE"`
-	BackfillSinceTime time.Time
+	Backfill          bool      `env:"BACKFILL"`
+	BackfillSinceDate string    `env:"BACKFILL_SINCE_DATE"`
+	BackfillSinceTime time.Time `env:"-"` // derived from BackfillSinceDate
 }
 
 // RegisterProwlarrFlags registers prowlarr-specific flags on the given

@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	base_config "github.com/onedr0p/exportarr/internal/config"
 	"github.com/spf13/pflag"
 )
 
@@ -64,4 +65,18 @@ func TestValidateProwlarr(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestLoadArrConfig_BarePrefixDoesNotSetBackfillTime(t *testing.T) {
+	flags := testFlagSet()
+	RegisterProwlarrFlags(flags)
+
+	t.Setenv("PROWLARR__", "2020-01-01T00:00:00Z")
+	c, err := LoadArrConfig(base_config.Config{}, flags)
+	assert.NoError(t, err)
+	assert.True(t, c.Prowlarr.BackfillSinceTime.IsZero(), "PROWLARR__ must not set the backfill time")
+
+	t.Setenv("PROWLARR__", "not-a-time")
+	_, err = LoadArrConfig(base_config.Config{}, flags)
+	assert.NoError(t, err, "a malformed PROWLARR__ must not abort every subcommand")
 }
