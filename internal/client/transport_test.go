@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
@@ -71,5 +72,38 @@ func TestDefaultBackoff_GrowsWithAttempts(t *testing.T) {
 		d := defaultBackoff(attempt)
 		assert.GreaterOrEqual(t, d, time.Duration(attempt)*retryBaseBackoff)
 		assert.True(t, d < time.Duration(attempt)*retryBaseBackoff+retryJitter, "jitter exceeds bound")
+	}
+}
+
+// queryKeyAuth authenticates like SABnzbd: the key rides in the query string.
+type queryKeyAuth struct{}
+
+func (queryKeyAuth) Auth(req *http.Request) error {
+	q := req.URL.Query()
+	q.Set("apikey", "hunter2")
+	req.URL.RawQuery = q.Encode()
+	return nil
+}
+
+func TestRoundTrip_RedirectErrorRedactsLocation(t *testing.T) {
+	for _, location := range []string{
+		"#top",
+		"https://sab.example.com/api?apikey=hunter2&mode=queue",
+		"//user:hunter2@sab.example.com/api",
+	} {
+		t.Run(location, func(t *testing.T) {
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Location", location)
+				w.WriteHeader(http.StatusFound)
+			}))
+			defer ts.Close()
+
+			c, err := NewClient(ts.URL, TransportOptions{}, 0, queryKeyAuth{})
+			assert.NoError(t, err)
+			err = c.DoRequest("api", nil)
+			assert.Error(t, err)
+			assert.Contains(t, err.Error(), "Redirect Status Code: 302")
+			assert.NotContains(t, err.Error(), "hunter2")
+		})
 	}
 }
