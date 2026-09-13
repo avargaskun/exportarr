@@ -14,4 +14,5 @@ github.com/onedr0p/exportarr/internal/sabnzbd/auth 100
 github.com/onedr0p/exportarr/internal/sabnzbd/collector 95
 github.com/onedr0p/exportarr/internal/sabnzbd/config 100
 github.com/onedr0p/exportarr/internal/sabnzbd/model 86
+github.com/onedr0p/exportarr/internal/targets 100
 github.com/onedr0p/exportarr/internal/tools/covercheck 99
