@@ -135,41 +135,29 @@ func (promhttpLogger) Println(v ...any) {
 	slog.Error(fmt.Sprintln(v...))
 }
 
-type registerFunc func(registry prometheus.Registerer)
-
 // newServer bounds every phase of a connection so a stalled or slow client
 // cannot pin it open. Writes get the scrape budget plus a margin, so a scrape
 // that times out can still deliver its 503.
-func newServer(conf *config.Config) *http.Server {
+var newServer = func(scrapeTimeout time.Duration) *http.Server {
 	return &http.Server{
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,
-		WriteTimeout:      conf.ScrapeTimeout + 10*time.Second,
+		WriteTimeout:      scrapeTimeout + 10*time.Second,
 		IdleTimeout:       60 * time.Second,
 	}
 }
 
-func serveHTTP(ctx context.Context, fn registerFunc) error {
+func serveHTTP(ctx context.Context, scrapeTimeout time.Duration, h http.Handler) error {
 	sigc := make(chan os.Signal, 1)
 	notifySignals(sigc, os.Interrupt, syscall.SIGTERM)
 	defer signal.Stop(sigc)
 
-	srv := newServer(conf)
-
-	registry := prometheus.NewRegistry()
-	registerAppInfoMetric(registry)
-	// The exporter's own runtime health: go_* and process_* metrics make its
-	// CPU, memory, and GC behavior visible to the operator.
-	registry.MustRegister(
-		collectors.NewGoCollector(),
-		collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}),
-	)
-	fn(registry)
+	srv := newServer(scrapeTimeout)
 
 	slog.Info("Starting HTTP Server",
 		"interface", conf.Interface,
 		"port", conf.Port)
-	srv.Handler = newHandler(conf, registry)
+	srv.Handler = h
 
 	ln, err := listen("tcp", listenAddr(conf))
 	if err != nil {
@@ -220,25 +208,57 @@ func (g *sharedGatherer) Gather() ([]*dto.MetricFamily, error) {
 // get a 503 instead of stacking more authenticated walks onto the target.
 const maxScrapesInFlight = 2
 
-func newHandler(conf *config.Config, registry *prometheus.Registry) http.Handler {
+// stackOpts describes one scrape target's /metrics stack.
+type stackOpts struct {
+	app, url      string
+	scrapeTimeout time.Duration
+}
+
+func newMetricsHandler(o stackOpts, registry *prometheus.Registry) http.Handler {
 	// Serve partial metrics when a collector fails rather than failing the
 	// whole scrape. Collectors report failures via *_collector_error gauges,
-	// except system status, which reports <app>_system_status 0. Scrape
-	// bookkeeping wraps only /metrics so health probes don't pollute it.
-	metricsHandler := promhttp.HandlerFor(&sharedGatherer{inner: registry}, promhttp.HandlerOpts{
+	// except system status, which reports <app>_system_status 0.
+	h := promhttp.HandlerFor(&sharedGatherer{inner: registry}, promhttp.HandlerOpts{
 		ErrorHandling:       promhttp.ContinueOnError,
 		ErrorLog:            promhttpLogger{},
 		MaxRequestsInFlight: maxScrapesInFlight,
-		Timeout:             conf.ScrapeTimeout,
+		Timeout:             o.scrapeTimeout,
 		// Exposes promhttp_metric_handler_errors_total for gather errors.
 		Registry: registry,
 	})
+	return handlers.MetricsHandler(o.app, o.url, registry, h)
+}
+
+func newHandler(conf *config.Config, registry *prometheus.Registry) http.Handler {
+	// Scrape bookkeeping wraps only /metrics so health probes don't pollute it.
 	mux := http.NewServeMux()
-	mux.Handle("GET /metrics", handlers.MetricsHandler(conf, registry, metricsHandler))
+	mux.Handle("GET /metrics", newMetricsHandler(stackOpts{
+		app:           conf.App,
+		url:           conf.URL,
+		scrapeTimeout: conf.ScrapeTimeout,
+	}, registry))
 	mux.HandleFunc("GET /healthz", handlers.HealthzHandler)
 	mux.HandleFunc("GET /", handlers.IndexHandler)
 
 	return handlers.LogHandler(handlers.RecoveryHandler(mux))
+}
+
+// newSelfRegistry holds the exporter's own health: app info, go_* and process_*.
+func newSelfRegistry() *prometheus.Registry {
+	registry := prometheus.NewRegistry()
+	registerAppInfoMetric(registry)
+	registry.MustRegister(
+		collectors.NewGoCollector(),
+		collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}),
+	)
+	return registry
+}
+
+// singleTargetHandler serves the self metrics and cs from one registry.
+func singleTargetHandler(cs ...prometheus.Collector) http.Handler {
+	registry := newSelfRegistry()
+	registry.MustRegister(cs...)
+	return newHandler(conf, registry)
 }
 
 func registerAppInfoMetric(registry prometheus.Registerer) {

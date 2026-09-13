@@ -8,7 +8,6 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/onedr0p/exportarr/internal/assert"
-	"github.com/onedr0p/exportarr/internal/config"
 )
 
 func TestHealthzHandler(t *testing.T) {
@@ -73,9 +72,8 @@ func labelValue(t *testing.T, reg *prometheus.Registry, family, label string) st
 }
 
 func TestMetricsHandler_RecordsDurationAndStatusCode(t *testing.T) {
-	conf := &config.Config{App: "radarr", URL: "http://radarr:7878"}
 	reg := prometheus.NewRegistry()
-	h := MetricsHandler(conf, reg, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	h := MetricsHandler("radarr", "http://radarr:7878", reg, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusTeapot)
 	}))
 
@@ -100,9 +98,8 @@ func TestMetricsHandler_RecordsDurationAndStatusCode(t *testing.T) {
 }
 
 func TestMetricsHandler_DefaultsToStatusOK(t *testing.T) {
-	conf := &config.Config{App: "sonarr", URL: "http://sonarr:8989"}
 	reg := prometheus.NewRegistry()
-	h := MetricsHandler(conf, reg, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	h := MetricsHandler("sonarr", "http://sonarr:8989", reg, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte("ok")) // no explicit WriteHeader
 	}))
 
@@ -110,4 +107,13 @@ func TestMetricsHandler_DefaultsToStatusOK(t *testing.T) {
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/metrics", nil))
 
 	assert.Equal(t, labelValue(t, reg, "sonarr_scrape_requests_total", "code"), "200")
+}
+
+func TestMetricsHandler_LabelsBothFamiliesWithURL(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	h := MetricsHandler("lidarr", "http://lidarr-hd:8686", reg, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/metrics", nil))
+
+	assert.Equal(t, labelValue(t, reg, "lidarr_scrape_requests_total", "url"), "http://lidarr-hd:8686")
+	assert.Equal(t, labelValue(t, reg, "lidarr_scrape_duration_seconds", "url"), "http://lidarr-hd:8686")
 }

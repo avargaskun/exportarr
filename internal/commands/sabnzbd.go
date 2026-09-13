@@ -3,7 +3,6 @@ package commands
 import (
 	"github.com/onedr0p/exportarr/internal/sabnzbd/collector"
 	"github.com/onedr0p/exportarr/internal/sabnzbd/config"
-	"github.com/prometheus/client_golang/prometheus"
 	"github.com/spf13/cobra"
 )
 
@@ -29,8 +28,6 @@ var sabnzbdCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		return serveHTTP(cmd.Context(), func(r prometheus.Registerer) {
-			r.MustRegister(collector)
-		})
+		return serveHTTP(cmd.Context(), conf.ScrapeTimeout, singleTargetHandler(collector))
 	},
 }

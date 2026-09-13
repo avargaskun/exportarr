@@ -15,6 +15,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -126,6 +127,7 @@ type runningCommand struct {
 	client *http.Client
 	cancel context.CancelFunc
 	sigc   chan<- os.Signal
+	server atomic.Pointer[http.Server]
 	done   chan struct{}
 	err    error
 }
@@ -170,6 +172,13 @@ func startCommand(t *testing.T, env map[string]string, args ...string) *runningC
 		cancel: cancel,
 		done:   make(chan struct{}),
 	}
+	savedNewServer := newServer
+	t.Cleanup(func() { newServer = savedNewServer })
+	newServer = func(scrapeTimeout time.Duration) *http.Server {
+		srv := savedNewServer(scrapeTimeout)
+		rc.server.Store(srv)
+		return srv
+	}
 	rootCmd.SetArgs(args)
 	go func() {
 		defer close(rc.done)
@@ -197,6 +206,9 @@ func startCommand(t *testing.T, env map[string]string, args ...string) *runningC
 }
 
 func (rc *runningCommand) URL() string { return rc.url }
+
+// Server returns the last *http.Server the command built, or nil.
+func (rc *runningCommand) Server() *http.Server { return rc.server.Load() }
 
 func (rc *runningCommand) Logs() string { return rc.logs.String() }
 
@@ -312,6 +324,15 @@ func TestHarness_Sonarr(t *testing.T) {
 	rc.Stop()
 	assert.Contains(t, rc.Logs(), "Starting HTTP Server")
 	assert.Contains(t, rc.Logs(), `msg="Shutting down due to signal" signal=terminated`)
+}
+
+func TestHarness_RecordsServer(t *testing.T) {
+	fake := fixtures.NewFakeApp(t, fixtures.FakeAppOptions{App: "sonarr", APIKey: fixtures.APIKey})
+	rc := startCommand(t, map[string]string{"URL": fake.URL, "API_KEY": fixtures.APIKey, "SCRAPE_TIMEOUT": "45s"}, "sonarr")
+	srv := rc.Server()
+	assert.True(t, srv != nil, "no server recorded")
+	assert.Equal(t, srv.WriteTimeout, 55*time.Second)
+	rc.Stop()
 }
 
 func TestHarness_Sabnzbd(t *testing.T) {

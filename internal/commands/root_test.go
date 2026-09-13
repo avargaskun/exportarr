@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"sync/atomic"
@@ -139,22 +140,131 @@ func TestHandler_ConcurrentScrapesShareOneGather(t *testing.T) {
 	assert.Equal(t, blocking.calls.Load(), int32(1))
 }
 
-func TestHandler_ScrapeTimeout(t *testing.T) {
+func metricsStackServer(t *testing.T, o stackOpts, cs ...prometheus.Collector) *httptest.Server {
+	t.Helper()
+	registry := prometheus.NewRegistry()
+	registry.MustRegister(cs...)
+	ts := httptest.NewServer(newMetricsHandler(o, registry))
+	t.Cleanup(ts.Close)
+	return ts
+}
+
+func TestNewMetricsHandler_ScrapeTimeout(t *testing.T) {
 	blocking := newBlockingCollector()
 	defer close(blocking.release)
-	ts := testServer(t, 100*time.Millisecond, blocking)
+	ts := metricsStackServer(t, stackOpts{app: "test", url: "http://target", scrapeTimeout: 100 * time.Millisecond}, blocking)
 
-	code, body := get(t, http.MethodGet, ts.URL+"/metrics")
+	code, body := get(t, http.MethodGet, ts.URL)
 	assert.Equal(t, code, http.StatusServiceUnavailable)
 	assert.True(t, strings.Contains(body, "timeout"), "unexpected body %q", body)
 }
 
+func TestNewMetricsHandler_MaxRequestsInFlight(t *testing.T) {
+	blocking := newBlockingCollector()
+	o := stackOpts{app: "test", url: "http://target", scrapeTimeout: time.Minute}
+	registry := prometheus.NewRegistry()
+	registry.MustRegister(blocking)
+	handler := newMetricsHandler(o, registry)
+	var arrived atomic.Int32
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		arrived.Add(1)
+		handler.ServeHTTP(w, r)
+	}))
+	defer ts.Close()
+
+	codes := make(chan int, maxScrapesInFlight)
+	for range maxScrapesInFlight {
+		go func() {
+			resp, err := http.Get(ts.URL)
+			if err != nil {
+				codes <- 0
+				return
+			}
+			_, _ = io.Copy(io.Discard, resp.Body)
+			_ = resp.Body.Close()
+			codes <- resp.StatusCode
+		}()
+	}
+	<-blocking.started
+	for arrived.Load() < maxScrapesInFlight {
+		time.Sleep(10 * time.Millisecond)
+	}
+	time.Sleep(50 * time.Millisecond)
+
+	code, body := get(t, http.MethodGet, ts.URL)
+	assert.Equal(t, code, http.StatusServiceUnavailable)
+	assert.Contains(t, body, "Limit of concurrent requests reached")
+
+	close(blocking.release)
+	for range maxScrapesInFlight {
+		assert.Equal(t, <-codes, http.StatusOK)
+	}
+
+	_, body = get(t, http.MethodGet, ts.URL)
+	assert.Contains(t, body, `test_scrape_requests_total{code="200",url="http://target"} 2`)
+	assert.Contains(t, body, `test_scrape_requests_total{code="503",url="http://target"} 1`)
+}
+
 func TestServerTimeouts(t *testing.T) {
-	srv := newServer(&config.Config{ScrapeTimeout: 2 * time.Minute})
+	srv := newServer(2 * time.Minute)
 	assert.Equal(t, srv.ReadHeaderTimeout, 10*time.Second)
 	assert.Equal(t, srv.ReadTimeout, 30*time.Second)
 	assert.Equal(t, srv.IdleTimeout, 60*time.Second)
-	assert.True(t, srv.WriteTimeout > 2*time.Minute, "WriteTimeout %s must exceed the scrape timeout", srv.WriteTimeout)
+	assert.Equal(t, srv.WriteTimeout, 2*time.Minute+10*time.Second)
+}
+
+func useAppInfo(t *testing.T) {
+	t.Helper()
+	saved := appInfo
+	t.Cleanup(func() { appInfo = saved })
+	appInfo = &AppInfo{Name: "exportarr", Version: "1.2.3", BuildTime: "now", Revision: "abc"}
+}
+
+func TestNewSelfRegistry(t *testing.T) {
+	useAppInfo(t)
+	mfs, err := newSelfRegistry().Gather()
+	assert.NoError(t, err)
+	names := map[string]bool{}
+	for _, mf := range mfs {
+		names[mf.GetName()] = true
+	}
+	assert.True(t, names["exportarr_app_info"], "missing exportarr_app_info in %v", names)
+	assert.True(t, names["go_goroutines"], "missing go_goroutines in %v", names)
+	switch runtime.GOOS {
+	case "linux", "darwin", "windows":
+		assert.True(t, names["process_cpu_seconds_total"], "missing process_cpu_seconds_total in %v", names)
+	}
+}
+
+type constCollector struct{ desc *prometheus.Desc }
+
+func (c constCollector) Describe(ch chan<- *prometheus.Desc) { ch <- c.desc }
+
+func (c constCollector) Collect(ch chan<- prometheus.Metric) {
+	ch <- prometheus.MustNewConstMetric(c.desc, prometheus.GaugeValue, 42)
+}
+
+func TestSingleTargetHandler(t *testing.T) {
+	useAppInfo(t)
+	savedConf := conf
+	t.Cleanup(func() { conf = savedConf })
+	conf = &config.Config{App: "radarr", URL: "http://radarr:7878", ScrapeTimeout: time.Minute}
+
+	ts := httptest.NewServer(singleTargetHandler(constCollector{prometheus.NewDesc("extra_series", "test", nil, nil)}))
+	defer ts.Close()
+
+	code, body := get(t, http.MethodGet, ts.URL+"/metrics")
+	assert.Equal(t, code, http.StatusOK)
+	assert.Contains(t, body, "extra_series 42")
+	assert.Contains(t, body, `exportarr_app_info{app_name="exportarr",build_time="now",revision="abc",version="1.2.3"} 1`)
+	assert.Contains(t, body, "go_goroutines")
+
+	_, body = get(t, http.MethodGet, ts.URL+"/metrics")
+	assert.Contains(t, body, `radarr_scrape_requests_total{code="200",url="http://radarr:7878"} 1`)
+
+	code, body = get(t, http.MethodGet, ts.URL+"/healthz")
+	assert.Equal(t, code, http.StatusOK)
+	assert.Equal(t, body, "OK")
 }
 
 func TestWarnSecretFlags(t *testing.T) {
@@ -252,11 +362,9 @@ func loopbackListen() (func(string, string) (net.Listener, error), chan string) 
 	}, addrc
 }
 
-func noCollectors(prometheus.Registerer) {}
-
-func startServeHTTP(ctx context.Context, fn registerFunc) chan error {
+func startServeHTTP(ctx context.Context, h http.Handler) chan error {
 	errc := make(chan error, 1)
-	go func() { errc <- serveHTTP(ctx, fn) }()
+	go func() { errc <- serveHTTP(ctx, time.Minute, h) }()
 	return errc
 }
 
@@ -275,7 +383,7 @@ func TestServeHTTP_ListenError(t *testing.T) {
 	logs, _ := useServeHooks(t, func(string, string) (net.Listener, error) {
 		return nil, errors.New("address in use")
 	})
-	err := serveHTTP(context.Background(), noCollectors)
+	err := serveHTTP(context.Background(), time.Minute, singleTargetHandler())
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to start HTTP server: address in use")
 	assert.Contains(t, logs.String(), "Starting HTTP Server")
@@ -290,7 +398,7 @@ func TestServeHTTP_ClosedListener(t *testing.T) {
 		_ = ln.Close()
 		return ln, nil
 	})
-	err := serveHTTP(context.Background(), noCollectors)
+	err := serveHTTP(context.Background(), time.Minute, singleTargetHandler())
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to start HTTP server")
 }
@@ -301,7 +409,7 @@ func TestServeHTTP_ContextCancelled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	errc := startServeHTTP(ctx, noCollectors)
+	errc := startServeHTTP(ctx, singleTargetHandler())
 	addr := <-addrc
 	code, body := get(t, http.MethodGet, "http://"+addr+"/healthz")
 	assert.Equal(t, code, http.StatusOK)
@@ -316,7 +424,7 @@ func TestServeHTTP_Signal(t *testing.T) {
 	listenFn, addrc := loopbackListen()
 	logs, sigcc := useServeHooks(t, listenFn)
 
-	errc := startServeHTTP(context.Background(), noCollectors)
+	errc := startServeHTTP(context.Background(), singleTargetHandler())
 	<-addrc
 	(<-sigcc) <- os.Interrupt
 	assert.NoError(t, waitErr(t, errc))
@@ -333,7 +441,7 @@ func TestServeHTTP_GracefulShutdownFailure(t *testing.T) {
 	blocking := newBlockingCollector()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	errc := startServeHTTP(ctx, func(r prometheus.Registerer) { r.MustRegister(blocking) })
+	errc := startServeHTTP(ctx, singleTargetHandler(blocking))
 	addr := <-addrc
 
 	scraped := make(chan int, 1)
