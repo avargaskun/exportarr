@@ -1,22 +1,33 @@
 package client
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"github.com/onedr0p/exportarr/internal/assert"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestNewClient(t *testing.T) {
 	u := "http://localhost"
-	c, err := NewClient(u, true, 0, nil)
+	c, err := NewClient(u, TransportOptions{InsecureSkipVerify: true}, 0, nil)
 	assert.NoError(t, err, "NewClient should not return an error")
 	assert.NotNil(t, c, "NewClient should return a client")
 	assert.Equal(t, c.URL.String(), u, "NewClient should set the correct URL")
 	assert.True(t, c.httpClient.Transport.(*ExportarrTransport).inner.(*http.Transport).TLSClientConfig.InsecureSkipVerify)
+}
+
+func TestBaseTransport_Proxy(t *testing.T) {
+	transport := BaseTransport(TransportOptions{}).(*http.Transport)
+	assert.True(t, transport.Proxy == nil, "the environment proxy must be ignored by default")
+
+	transport = BaseTransport(TransportOptions{ProxyFromEnvironment: true}).(*http.Transport)
+	assert.True(t, transport.Proxy != nil, "the environment proxy must be honored when opted in")
 }
 
 func TestDoRequest(t *testing.T) {
@@ -63,7 +74,7 @@ func TestDoRequest(t *testing.T) {
 			}{}
 			expected := target
 			expected.Test = "asdf2"
-			client, err := NewClient(ts.URL, false, 0, nil)
+			client, err := NewClient(ts.URL, TransportOptions{}, 0, nil)
 			if err != nil {
 				panic(err)
 			}
@@ -92,7 +103,7 @@ func TestDoRequest_PanicRecovery(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	client, err := NewClient(ts.URL, false, 0, nil)
+	client, err := NewClient(ts.URL, TransportOptions{}, 0, nil)
 	assert.Nil(t, err, "NewClient should not return an error")
 	assert.NotNil(t, client, "NewClient should return a client")
 
@@ -108,7 +119,7 @@ func TestDoRequest_ResponseTooLarge(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	client, err := NewClient(ts.URL, false, 0, nil)
+	client, err := NewClient(ts.URL, TransportOptions{}, 0, nil)
 	assert.NoError(t, err)
 	client.maxBodyBytes = 1024
 
@@ -120,4 +131,47 @@ func TestDoRequest_ResponseTooLarge(t *testing.T) {
 	client.maxBodyBytes = 4096
 	assert.NoError(t, client.DoRequest("test", &out))
 	assert.Equal(t, len(out), 1)
+}
+
+func TestDoRequest_RedactsURLInErrorsAndLogs(t *testing.T) {
+	var logs bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	defer slog.SetDefault(prev)
+
+	ts := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	addr := ts.URL
+	ts.Close()
+
+	client, err := NewClient(addr+"/base", TransportOptions{}, time.Second, nil)
+	assert.NoError(t, err)
+	err = client.DoRequest("queue", nil, QueryParams{"token": {"hunter2"}})
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), addr+"/base/queue")
+	assert.NotContains(t, err.Error(), "hunter2")
+	assert.Contains(t, logs.String(), addr+"/base/queue")
+	assert.NotContains(t, logs.String(), "hunter2")
+}
+
+type panicOnDecode struct{}
+
+func (*panicOnDecode) UnmarshalJSON([]byte) error { panic("boom") }
+
+func TestDoRequest_PanicDoesNotLogBody(t *testing.T) {
+	var logs bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	defer slog.SetDefault(prev)
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = fmt.Fprintf(w, "{}\n{\"password\":\"%stracker-secret\"}", strings.Repeat("x", 64<<10))
+	}))
+	defer ts.Close()
+
+	client, err := NewClient(ts.URL, TransportOptions{}, 0, nil)
+	assert.NoError(t, err)
+	err = client.DoRequest("indexer", &panicOnDecode{})
+	assert.Error(t, err)
+	assert.Contains(t, logs.String(), "Recovered while unmarshalling response")
+	assert.NotContains(t, logs.String(), "tracker-secret")
 }

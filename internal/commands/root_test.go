@@ -1,7 +1,9 @@
 package commands
 
 import (
+	"bytes"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -10,7 +12,9 @@ import (
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/spf13/pflag"
 
+	arrconfig "github.com/onedr0p/exportarr/internal/arr/config"
 	"github.com/onedr0p/exportarr/internal/assert"
 	"github.com/onedr0p/exportarr/internal/config"
 )
@@ -144,4 +148,23 @@ func TestServerTimeouts(t *testing.T) {
 	assert.Equal(t, srv.ReadTimeout, 30*time.Second)
 	assert.Equal(t, srv.IdleTimeout, 60*time.Second)
 	assert.True(t, srv.WriteTimeout > 2*time.Minute, "WriteTimeout %s must exceed the scrape timeout", srv.WriteTimeout)
+}
+
+func TestWarnSecretFlags(t *testing.T) {
+	var logs bytes.Buffer
+	log := slog.New(slog.NewTextHandler(&logs, nil))
+
+	flags := pflag.NewFlagSet("test", pflag.ContinueOnError)
+	config.RegisterConfigFlags(flags)
+	arrconfig.RegisterArrFlags(flags)
+
+	warnSecretFlags(log, flags)
+	assert.Equal(t, logs.String(), "")
+
+	_ = flags.Set("api-key", "abcdef0123456789abcdef0123456789")
+	_ = flags.Set("auth-password", "hunter2")
+	warnSecretFlags(log, flags)
+	assert.Contains(t, logs.String(), "flag=--api-key")
+	assert.Contains(t, logs.String(), "flag=--auth-password")
+	assert.NotContains(t, logs.String(), "hunter2")
 }

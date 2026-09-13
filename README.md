@@ -20,14 +20,16 @@ See examples in the [examples/kubernetes](./examples/kubernetes/) directory.
 
 ### Docker CLI
 
-_Replace `$app`, `$port` and `$apikey` with one of the supported apps, port and api key_
+_Replace `$app` and `$port` with one of the supported apps and its port, and put the app's API key in `./api_key`_
 
 ```sh
-# PORT must be unique across all Exportarr instances
+# PORT must be unique across all Exportarr instances.
+# ./api_key must be readable by UID 65532, the container user.
 docker run --name exportarr_$app \
   -e PORT=9707 \
   -e URL="http://x.x.x.x:$port" \
-  -e API_KEY="$apikey" \
+  -e API_KEY_FILE=/run/secrets/api_key \
+  -v "$PWD/api_key:/run/secrets/api_key:ro" \
   --restart unless-stopped \
   -p 9707:9707 \
   -d ghcr.io/onedr0p/exportarr:latest $app
@@ -37,16 +39,15 @@ Visit http://127.0.0.1:9707/metrics to see the app metrics
 
 ### CLI
 
-_Replace `$app`, `$port` and `$apikey` with one of the supported apps, port and api key_
+_Replace `$app` and `$port` with one of the supported apps and its port, and put the app's API key in `./api_key`_
 
 ```sh
 ./exportarr $app --help
 
 # --port must be unique across all Exportarr instances
-./exportarr $app \
+API_KEY_FILE=./api_key ./exportarr $app \
   --port 9707 \
-  --url "http://x.x.x.x:$port" \
-  --api-key "$apikey"
+  --url "http://x.x.x.x:$port"
 ```
 
 Visit http://127.0.0.1:9707/metrics to see the app metrics
@@ -56,16 +57,17 @@ Visit http://127.0.0.1:9707/metrics to see the app metrics
 |        Environment Variable        | CLI Flag                       | Description                                                                                                               | Default              | Required |
 | :--------------------------------: | ------------------------------ | ------------------------------------------------------------------------------------------------------------------------- | -------------------- | :------: |
 |               `PORT`               | `--port` or `-p`               | The port Exportarr will listen on                                                                                         | `9707`               |    ❌    |
-|               `URL`                | `--url` or `-u`                | The full URL to the app being exported                                                                                    |                      |    ✅    |
-|             `API_KEY`              | `--api-key` or `-a`            | API Key for the app being exported                                                                                        |                      |    ✅    |
+|               `URL`                | `--url` or `-u`                | The full URL to the app being exported, without credentials or a query string (e.g. `http://sonarr:8989`)                 |                      |    ✅    |
+|             `API_KEY`              | `--api-key` or `-a`            | API Key for the app being exported (prefer `API_KEY_FILE`; the flag is visible in the process list)                       |                      |    ✅    |
 |           `API_KEY_FILE`           | —                              | Path to a file containing the API key (Docker/Kubernetes secrets); overrides `API_KEY`                                    |                      |    ❌    |
 |            `INTERFACE`             | `--interface` or `-i`          | The interface IP Exportarr will listen on                                                                                 | `0.0.0.0`            |    ❌    |
 |            `LOG_LEVEL`             | `--log-level` or `-l`          | Log level (`debug`, `info`, `warn`, `error`)                                                                              | `info`               |    ❌    |
 |            `LOG_FORMAT`            | `--log-format`                 | Log format (`console`, `json`)                                                                                            | `console`            |    ❌    |
 |        `DISABLE_SSL_VERIFY`        | `--disable-ssl-verify`         | Set to `true` to disable SSL verification                                                                                 | `false`              |    ❌    |
+|          `PROXY_FROM_ENV`          | `--proxy-from-env`             | Send requests to the app through `HTTP_PROXY`/`HTTPS_PROXY`/`NO_PROXY`; off by default because the proxy sees the API key | `false`              |    ❌    |
 |         `REQUEST_TIMEOUT`          | `--request-timeout`            | HTTP timeout per request to the target app                                                                                | `60s`                |    ❌    |
 |          `SCRAPE_TIMEOUT`          | `--scrape-timeout`             | Time budget for one scrape (`/metrics` answers 503 past it); keep it at or below Prometheus's `scrape_timeout`            | `2m`                 |    ❌    |
-|          `AUTH_PASSWORD`           | `--auth-password`              | Password for form auth                                                                                                    |                      |    ❌    |
+|          `AUTH_PASSWORD`           | `--auth-password`              | Password for form auth (prefer the environment variable; the flag is visible in the process list)                         |                      |    ❌    |
 |          `AUTH_USERNAME`           | `--auth-username`              | Username for form auth                                                                                                    |                      |    ❌    |
 |            `FORM_AUTH`             | `--form-auth`                  | Use form-based authentication                                                                                             | `false`              |    ❌    |
 |    `ENABLE_UNKNOWN_QUEUE_ITEMS`    | `--enable-unknown-queue-items` | Set to `true` to enable gathering unknown queue items                                                                     | `false`              |    ❌    |
@@ -79,6 +81,12 @@ Visit http://127.0.0.1:9707/metrics to see the app metrics
 |  `PROWLARR__BACKFILL_SINCE_DATE`   | `--backfill-since-date`        | Set a date (`YYYY-MM-DD`) from which to start the backfill                                                                | `1970-01-01` (epoch) |    ❌    |
 |    `BAZARR__SERIES_BATCH_SIZE`     | `--series-batch-size`          | Number of series per Bazarr episodes API call                                                                             | `300`                |    ❌    |
 | `BAZARR__SERIES_BATCH_CONCURRENCY` | `--series-batch-concurrency`   | Concurrent Bazarr episodes API calls                                                                                      | `10`                 |    ❌    |
+
+### Secrets
+
+- Prefer `API_KEY_FILE` pointing at a read-only mounted secret (Docker or Kubernetes secrets) over an inline `API_KEY`.
+- `API_KEY`, `AUTH_USERNAME` and `AUTH_PASSWORD` are removed from the exporter's own environment after they are read, so child processes and `os.Environ` never see them. They remain visible in `/proc/<pid>/environ` and `docker inspect`, so this is not a substitute for a mounted secret.
+- Avoid `--api-key` and `--auth-password`: command-line arguments are readable by every local user through the process list. exportarr logs a warning when they are used.
 
 ### Prowlarr Backfill
 

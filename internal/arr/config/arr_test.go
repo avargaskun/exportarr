@@ -2,6 +2,7 @@ package config
 
 import (
 	"github.com/onedr0p/exportarr/internal/assert"
+	"os"
 	"testing"
 	"time"
 
@@ -66,6 +67,12 @@ func TestLoadConfig_SeriesConcurrency(t *testing.T) {
 	assert.Equal(t, config.SeriesConcurrency, 2)
 }
 
+func TestLoadConfig_ProxyFromBase(t *testing.T) {
+	config, err := LoadArrConfig(base_config.Config{ProxyFromEnv: true}, testFlagSet())
+	assert.NoError(t, err)
+	assert.True(t, config.ProxyFromEnv)
+}
+
 func TestLoadConfig_CollectTimeoutFromBase(t *testing.T) {
 	config, err := LoadArrConfig(base_config.Config{ScrapeTimeout: time.Minute}, testFlagSet())
 	assert.NoError(t, err)
@@ -102,6 +109,21 @@ func TestLoadConfig_Environment(t *testing.T) {
 	assert.Equal(t, config.APIKey, "abcdef0123456789abcdef0123456789")
 	assert.True(t, config.DisableSSLVerify)
 
+}
+
+func TestLoadConfig_UnsetsFormAuthCredentials(t *testing.T) {
+	t.Setenv("AUTH_USERNAME", "user")
+	t.Setenv("AUTH_PASSWORD", "pass")
+
+	config, err := LoadArrConfig(base_config.Config{}, testFlagSet())
+	assert.NoError(t, err)
+	assert.Equal(t, config.AuthUsername, "user")
+	assert.Equal(t, config.AuthPassword, "pass")
+
+	_, ok := os.LookupEnv("AUTH_USERNAME")
+	assert.False(t, ok, "AUTH_USERNAME should be removed from the environment")
+	_, ok = os.LookupEnv("AUTH_PASSWORD")
+	assert.False(t, ok, "AUTH_PASSWORD should be removed from the environment")
 }
 
 func TestLoadConfig_PartialEnvironment(t *testing.T) {
@@ -269,6 +291,24 @@ func TestValidate(t *testing.T) {
 				SeriesConcurrency: MaxSeriesConcurrency,
 			},
 			valid: true,
+		},
+		{
+			name: "url-with-credentials",
+			config: &ArrConfig{ //nolint:gosec // rejected-credentials fixture
+				URL:               "http://user:pass@localhost",
+				APIKey:            "abcdef0123456789abcdef0123456789",
+				SeriesConcurrency: 10,
+			},
+			valid: false,
+		},
+		{
+			name: "url-with-query",
+			config: &ArrConfig{
+				URL:               "http://localhost/?apikey=abcdef0123456789abcdef0123456789",
+				APIKey:            "abcdef0123456789abcdef0123456789",
+				SeriesConcurrency: 10,
+			},
+			valid: false,
 		},
 		{
 			name: "form-auth-needs-user-and-password",

@@ -167,14 +167,7 @@ func (collector *prowlarrCollector) Collect(ch chan<- prometheus.Metric) {
 			enabledIndexers++
 		}
 
-		for _, field := range indexer.Fields {
-			if field.Name != "vipExpiration" {
-				continue
-			}
-			expiration, ok := field.Value.(string)
-			if !ok || expiration == "" {
-				continue
-			}
+		if expiration := indexer.Fields.VipExpiration; expiration != "" {
 			t, err := time.Parse("2006-01-02", expiration)
 			if err != nil {
 				// One malformed indexer should not abort the whole collection.

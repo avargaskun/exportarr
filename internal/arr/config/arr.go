@@ -44,8 +44,8 @@ func RegisterArrFlags(flags *flag.FlagSet) {
 type ArrConfig struct {
 	App                     string         `env:"-"`
 	APIVersion              string         `env:"API_VERSION" envDefault:"v3"`
-	AuthUsername            string         `env:"AUTH_USERNAME"`
-	AuthPassword            string         `env:"AUTH_PASSWORD"`
+	AuthUsername            string         `env:"AUTH_USERNAME,unset"`
+	AuthPassword            string         `env:"AUTH_PASSWORD,unset"`
 	FormAuth                bool           `env:"FORM_AUTH"`
 	EnableUnknownQueueItems bool           `env:"ENABLE_UNKNOWN_QUEUE_ITEMS"`
 	DisableQualityMetrics   bool           `env:"DISABLE_QUALITY_METRICS"`
@@ -57,6 +57,7 @@ type ArrConfig struct {
 	URL                     string         `env:"-"` // from the base config
 	APIKey                  string         `env:"-"` // from the base config
 	DisableSSLVerify        bool           `env:"-"` // from the base config
+	ProxyFromEnv            bool           `env:"-"` // from the base config
 	RequestTimeout          time.Duration  `env:"-"` // from the base config
 	CollectTimeout          time.Duration  `env:"-"` // from the base config
 	Prowlarr                ProwlarrConfig `envPrefix:"PROWLARR__"`
@@ -82,6 +83,7 @@ func LoadArrConfig(conf base_config.Config, flags *flag.FlagSet) (*ArrConfig, er
 		URL:              conf.URL,
 		APIKey:           conf.APIKey,
 		DisableSSLVerify: conf.DisableSSLVerify,
+		ProxyFromEnv:     conf.ProxyFromEnv,
 		RequestTimeout:   conf.RequestTimeout,
 		CollectTimeout:   conf.CollectTimeout(),
 	}
@@ -107,8 +109,8 @@ func (c *ArrConfig) Validate() error {
 	var errs []error
 	if c.URL == "" {
 		errs = append(errs, errors.New("url is required"))
-	} else if u, err := url.Parse(c.URL); err != nil || u.Scheme == "" || u.Host == "" {
-		errs = append(errs, fmt.Errorf("url must be a valid URL: %q", c.URL))
+	} else if err := base_config.ValidateURL(c.URL); err != nil {
+		errs = append(errs, err)
 	}
 	if !apiKeyRegex.MatchString(c.APIKey) {
 		errs = append(errs, errors.New("api-key must be a 20-32 character alphanumeric string"))

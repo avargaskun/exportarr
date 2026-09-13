@@ -1,16 +1,37 @@
 package model
 
+import "encoding/json"
+
 // Indexer is the response from prowlarr's indexer endpoint.
 type Indexer []struct {
-	Name     string `json:"name"`
-	SortName string `json:"sortName"`
-	Enabled  bool   `json:"enable"`
-	Fields   []struct {
-		Name string `json:"name"`
-		// Value has multiple types, depending on the field, so it
-		// must be typecast at the call site.
-		Value any `json:"value"`
-	} `json:"fields"`
+	Name     string        `json:"name"`
+	SortName string        `json:"sortName"`
+	Enabled  bool          `json:"enable"`
+	Fields   IndexerFields `json:"fields"`
+}
+
+// IndexerFields keeps only the indexer settings the exporter reads. The other
+// settings include tracker credentials, so they are never decoded or kept.
+type IndexerFields struct {
+	VipExpiration string
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (f *IndexerFields) UnmarshalJSON(b []byte) error {
+	var fields []struct {
+		Name  string          `json:"name"`
+		Value json.RawMessage `json:"value"`
+	}
+	if err := json.Unmarshal(b, &fields); err != nil {
+		return err
+	}
+	for _, field := range fields {
+		if field.Name == "vipExpiration" {
+			// A non-string value means no expiration, as before.
+			_ = json.Unmarshal(field.Value, &f.VipExpiration)
+		}
+	}
+	return nil
 }
 
 // IndexerStats holds per-indexer query/grab counters.

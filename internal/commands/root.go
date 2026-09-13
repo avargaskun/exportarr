@@ -15,6 +15,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 	"golang.org/x/sync/singleflight"
 
 	"github.com/onedr0p/exportarr/internal/config"
@@ -50,6 +51,7 @@ More information available at the Github Repo (https://github.com/onedr0p/export
 				return err
 			}
 			initLogger()
+			warnSecretFlags(slog.Default(), cmd.Flags())
 			return nil
 		},
 	}
@@ -98,6 +100,18 @@ func initLogger() {
 		"buildTime", appInfo.BuildTime,
 		"revision", appInfo.Revision,
 	)
+}
+
+// secretFlags hold credentials; argv is readable by every local user.
+var secretFlags = []string{"api-key", "auth-password"}
+
+func warnSecretFlags(log *slog.Logger, flags *pflag.FlagSet) {
+	for _, name := range secretFlags {
+		if f := flags.Lookup(name); f != nil && f.Changed {
+			log.Warn("Secret passed as a command-line flag is visible to every local user in the process list; use the environment or API_KEY_FILE instead",
+				"flag", "--"+name)
+		}
+	}
 }
 
 // promhttpLogger routes promhttp's internal gather errors to slog.

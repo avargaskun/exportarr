@@ -22,6 +22,14 @@ func TestLoadConfig_Defaults(t *testing.T) {
 	assert.Equal(t, config.Port, 9707)
 	assert.Equal(t, config.Interface, "0.0.0.0")
 	assert.Equal(t, config.ScrapeTimeout, 2*time.Minute)
+	assert.False(t, config.ProxyFromEnv)
+}
+
+func TestLoadConfig_ProxyFromEnv(t *testing.T) {
+	t.Setenv("PROXY_FROM_ENV", "true")
+	config, err := LoadConfig(&pflag.FlagSet{})
+	assert.NoError(t, err)
+	assert.True(t, config.ProxyFromEnv)
 }
 
 func TestLoadConfig_ScrapeTimeout(t *testing.T) {
@@ -241,6 +249,33 @@ func TestValidate(t *testing.T) {
 			} else {
 				assert.NoError(t, err)
 			}
+		})
+	}
+}
+
+func TestValidateURL(t *testing.T) {
+	for _, tc := range []struct {
+		url   string
+		valid bool
+	}{
+		{"http://localhost:8989", true},
+		{"https://sonarr.example.com/sonarr", true},
+		{"http://[::1]:8989", true},
+		{"localhost:8989", false},
+		{"/sonarr", false},
+		{"http://user:hunter2@localhost:8989", false},
+		{"http://user@localhost:8989", false},
+		{"http://localhost:8989/?apikey=hunter2", false},
+		{"http://localhost:8989/?", false},
+	} {
+		t.Run(tc.url, func(t *testing.T) {
+			err := ValidateURL(tc.url)
+			if tc.valid {
+				assert.NoError(t, err)
+				return
+			}
+			assert.Error(t, err)
+			assert.NotContains(t, err.Error(), "hunter2")
 		})
 	}
 }

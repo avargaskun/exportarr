@@ -97,3 +97,32 @@ func TestProwlarrCollect_PanicReleasesStatsLock(t *testing.T) {
 		t.Fatal("the next collection is stuck on the stats lock")
 	}
 }
+
+func TestProwlarrCollect_VipExpiration(t *testing.T) {
+	expiry := time.Now().AddDate(0, 0, 10).Format("2006-01-02")
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/indexer":
+			_, _ = w.Write([]byte(`[{"name":"vip","enable":true,"fields":[{"name":"password","value":"hunter2"},{"name":"vipExpiration","value":"` + expiry + `"}]}]`))
+		case "/api/v1/indexerstats":
+			_, _ = w.Write([]byte(`{"indexers":[],"userAgents":[]}`))
+		}
+	}))
+	defer ts.Close()
+
+	conf := &config.ArrConfig{App: "prowlarr", APIVersion: "v1", URL: ts.URL, APIKey: fixtures.APIKey}
+	cl, err := client.NewClient(conf)
+	assert.NoError(t, err)
+
+	registry := prometheus.NewRegistry()
+	registry.MustRegister(NewProwlarrCollector(cl, conf))
+	families, err := registry.Gather()
+	assert.NoError(t, err)
+	var seconds float64
+	for _, mf := range families {
+		if mf.GetName() == "prowlarr_indexer_vip_expires_in_seconds" {
+			seconds = mf.GetMetric()[0].GetGauge().GetValue()
+		}
+	}
+	assert.True(t, seconds > 8*24*3600 && seconds < 12*24*3600, "unexpected expiry %v", seconds)
+}

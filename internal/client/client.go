@@ -12,7 +12,6 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
-	"strings"
 	"time"
 )
 
@@ -36,8 +35,16 @@ type Client struct {
 // QueryParams holds URL query parameters.
 type QueryParams = url.Values
 
+// TransportOptions configures the transport a client sends requests through.
+type TransportOptions struct {
+	InsecureSkipVerify bool
+	// ProxyFromEnvironment honors HTTP(S)_PROXY/NO_PROXY. Off by default: a
+	// proxy would see the API key, session cookies and form credentials.
+	ProxyFromEnvironment bool
+}
+
 // NewClient method initializes a new *Arr client.
-func NewClient(baseURL string, insecureSkipVerify bool, timeout time.Duration, auth Authenticator) (*Client, error) {
+func NewClient(baseURL string, opts TransportOptions, timeout time.Duration, auth Authenticator) (*Client, error) {
 	if timeout <= 0 {
 		timeout = defaultRequestTimeout
 	}
@@ -53,7 +60,7 @@ func NewClient(baseURL string, insecureSkipVerify bool, timeout time.Duration, a
 				return http.ErrUseLastResponse
 			},
 			Timeout:   timeout,
-			Transport: NewExportarrTransport(BaseTransport(insecureSkipVerify), auth),
+			Transport: NewExportarrTransport(BaseTransport(opts), auth),
 		},
 		URL:          *u,
 		maxBodyBytes: maxResponseBytes,
@@ -63,19 +70,10 @@ func NewClient(baseURL string, insecureSkipVerify bool, timeout time.Duration, a
 func (c *Client) unmarshalBody(b io.Reader, target any) (err error) {
 	defer func() {
 		if r := recover(); r != nil {
-			// return recovered panic as error
+			// Never log the body: responses such as prowlarr's indexer list
+			// carry credentials.
 			err = fmt.Errorf("recovered from panic: %s", r)
-
-			log := slog.Default()
-			if log.Enabled(context.Background(), slog.LevelDebug) {
-				s := new(strings.Builder)
-				if _, copyErr := io.Copy(s, b); copyErr != nil {
-					log.Error("Failed to copy body to string in recover",
-						"error", copyErr, "recover", r)
-				}
-				log = log.With("body", s.String())
-			}
-			log.Error("Recovered while unmarshalling response", "error", r)
+			slog.Error("Recovered while unmarshalling response", "error", r)
 		}
 	}()
 	err = json.NewDecoder(b).Decode(target)
@@ -115,20 +113,25 @@ func (c *Client) DoRequestContext(ctx context.Context, endpoint string, target a
 
 	endpointURL := c.URL.JoinPath(endpoint)
 	endpointURL.RawQuery = values.Encode()
-	slog.Debug("Sending HTTP request", "url", endpointURL)
+	logURL := redactURL(endpointURL)
+	slog.Debug("Sending HTTP request", "url", logURL)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpointURL.String(), nil)
 	if err != nil {
-		return fmt.Errorf("failed to create HTTP Request(%s): %w", endpointURL, err)
+		return fmt.Errorf("failed to create HTTP Request(%s): %w", logURL, err)
 	}
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return fmt.Errorf("failed to execute HTTP Request(%s): %w", endpointURL, err)
+		// *url.Error repeats the full URL; the redacted one is already in the message.
+		if uerr := (*url.Error)(nil); errors.As(err, &uerr) {
+			err = uerr.Err
+		}
+		return fmt.Errorf("failed to execute HTTP Request(%s): %w", logURL, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	err = c.unmarshalBody(http.MaxBytesReader(nil, resp.Body, c.maxBodyBytes), target)
 	if tooLarge := (*http.MaxBytesError)(nil); errors.As(err, &tooLarge) {
-		return fmt.Errorf("response from %s exceeds %d bytes", endpointURL, tooLarge.Limit)
+		return fmt.Errorf("response from %s exceeds %d bytes", logURL, tooLarge.Limit)
 	}
 	return err
 }
@@ -147,15 +150,25 @@ func GetContext[T any](ctx context.Context, c *Client, endpoint string, queryPar
 	return out, err
 }
 
-// BaseTransport returns a clone of the default transport, optionally with TLS
-// verification disabled. Cloning keeps the insecure setting scoped to this
-// client instead of mutating the process-wide http.DefaultTransport.
-func BaseTransport(insecureSkipVerify bool) http.RoundTripper {
+// redactURL renders u as scheme://host[:port]/path, dropping the userinfo,
+// query and fragment, any of which can carry credentials.
+func redactURL(u *url.URL) string {
+	return (&url.URL{Scheme: u.Scheme, Host: u.Host, Path: u.Path}).String()
+}
+
+// BaseTransport returns a clone of the default transport configured by opts.
+// Cloning keeps these settings scoped to this client instead of mutating the
+// process-wide http.DefaultTransport.
+func BaseTransport(opts TransportOptions) http.RoundTripper {
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	// Every collector in a command scrapes the same host concurrently; the
 	// default of 2 idle conns per host forces constant TLS re-handshakes.
 	transport.MaxIdleConnsPerHost = 16
-	if insecureSkipVerify {
+	transport.Proxy = nil
+	if opts.ProxyFromEnvironment {
+		transport.Proxy = http.ProxyFromEnvironment
+	}
+	if opts.InsecureSkipVerify {
 		transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true} //nolint:gosec // opt-in via --disable-ssl-verify
 	}
 	return transport

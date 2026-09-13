@@ -36,7 +36,14 @@ func NewClient(config *config.ArrConfig) (*Client, error) {
 	if err != nil {
 		return nil, err
 	}
-	return client.NewClient(config.BaseURL(), config.DisableSSLVerify, config.RequestTimeout, auth)
+	return client.NewClient(config.BaseURL(), transportOptions(config), config.RequestTimeout, auth)
+}
+
+func transportOptions(config *config.ArrConfig) client.TransportOptions {
+	return client.TransportOptions{
+		InsecureSkipVerify:   config.DisableSSLVerify,
+		ProxyFromEnvironment: config.ProxyFromEnv,
+	}
 }
 
 // NewAuth selects the authenticator (form, basic, or API key) for the config.
@@ -53,7 +60,7 @@ func NewAuth(config *config.ArrConfig) (client.Authenticator, error) {
 			Password:    config.AuthPassword,
 			APIKey:      config.APIKey,
 			AuthBaseURL: u,
-			Transport:   client.BaseTransport(config.DisableSSLVerify),
+			Transport:   client.BaseTransport(transportOptions(config)),
 			Timeout:     config.RequestTimeout,
 		}
 	} else {

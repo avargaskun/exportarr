@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"net/url"
 	"strings"
 	"time"
 
@@ -21,6 +22,7 @@ func RegisterConfigFlags(flags *flag.FlagSet) {
 	flags.StringP("url", "u", "", "URL to *arr instance")
 	flags.StringP("api-key", "a", "", "API Key for *arr instance")
 	flags.Bool("disable-ssl-verify", false, "Disable SSL verification")
+	flags.Bool("proxy-from-env", false, "Send requests to the target app through HTTP_PROXY/HTTPS_PROXY (off by default: the proxy sees the credentials)")
 	flags.StringP("interface", "i", "", "IP address to listen on")
 	flags.IntP("port", "p", 0, "Port to listen on")
 	flags.Duration("request-timeout", 0, "HTTP timeout per request to the target app")
@@ -33,9 +35,8 @@ type Config struct {
 	LogLevel  string `env:"LOG_LEVEL" envDefault:"info"`
 	LogFormat string `env:"LOG_FORMAT" envDefault:"console"`
 	URL       string `env:"URL"`
-	// Secret-bearing variables carry the `unset` option: the env library
-	// removes them from the process environment after parsing, so they are
-	// not visible in /proc/<pid>/environ or inherited by child processes.
+	// `unset` only hides secrets from os.Environ and child processes; they stay
+	// in /proc/<pid>/environ and `docker inspect`, so prefer API_KEY_FILE.
 	APIKey string `env:"API_KEY,unset"`
 	// APIKeyFromFile receives the *contents* of the file named by API_KEY_FILE
 	// (the env library's `file` option) — Docker/Kubernetes secrets mounts.
@@ -43,6 +44,7 @@ type Config struct {
 	Port             int           `env:"PORT" envDefault:"9707"`
 	Interface        string        `env:"INTERFACE" envDefault:"0.0.0.0"`
 	DisableSSLVerify bool          `env:"DISABLE_SSL_VERIFY"`
+	ProxyFromEnv     bool          `env:"PROXY_FROM_ENV"`
 	RequestTimeout   time.Duration `env:"REQUEST_TIMEOUT" envDefault:"60s"`
 	ScrapeTimeout    time.Duration `env:"SCRAPE_TIMEOUT" envDefault:"2m"`
 }
@@ -85,6 +87,7 @@ func LoadConfig(flags *flag.FlagSet) (*Config, error) {
 	OverlayFlag(flags, "interface", flags.GetString, &out.Interface)
 	OverlayFlag(flags, "port", flags.GetInt, &out.Port)
 	OverlayFlag(flags, "disable-ssl-verify", flags.GetBool, &out.DisableSSLVerify)
+	OverlayFlag(flags, "proxy-from-env", flags.GetBool, &out.ProxyFromEnv)
 	OverlayFlag(flags, "request-timeout", flags.GetDuration, &out.RequestTimeout)
 	OverlayFlag(flags, "scrape-timeout", flags.GetDuration, &out.ScrapeTimeout)
 
@@ -94,6 +97,22 @@ func LoadConfig(flags *flag.FlagSet) (*Config, error) {
 		out.APIKey = strings.TrimSpace(out.APIKeyFromFile)
 	}
 	return out, nil
+}
+
+// ValidateURL checks a target app URL. Credentials and query strings are
+// rejected because the URL is the url label on every series and is logged;
+// errors never echo the URL for the same reason.
+func ValidateURL(raw string) error {
+	u, err := url.Parse(raw)
+	switch {
+	case err != nil || u.Scheme == "" || u.Host == "":
+		return errors.New("url must be an absolute URL (scheme://host[:port][/path])")
+	case u.User != nil:
+		return errors.New("url must not contain credentials; use API_KEY_FILE/API_KEY or form auth")
+	case u.RawQuery != "" || u.ForceQuery:
+		return errors.New("url must not contain a query string")
+	}
+	return nil
 }
 
 // Validate checks the configuration against its validation rules.

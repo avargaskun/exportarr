@@ -3,8 +3,6 @@ package config
 
 import (
 	"errors"
-	"fmt"
-	"net/url"
 	"time"
 
 	base_config "github.com/onedr0p/exportarr/internal/config"
@@ -15,6 +13,7 @@ type SabnzbdConfig struct {
 	URL              string
 	APIKey           string
 	DisableSSLVerify bool
+	ProxyFromEnv     bool
 	RequestTimeout   time.Duration
 	CollectTimeout   time.Duration
 }
@@ -25,6 +24,7 @@ func LoadSabnzbdConfig(conf base_config.Config) (*SabnzbdConfig, error) {
 		URL:              conf.URL,
 		APIKey:           conf.APIKey,
 		DisableSSLVerify: conf.DisableSSLVerify,
+		ProxyFromEnv:     conf.ProxyFromEnv,
 		RequestTimeout:   conf.RequestTimeout,
 		CollectTimeout:   conf.CollectTimeout(),
 	}
@@ -36,8 +36,8 @@ func (c *SabnzbdConfig) Validate() error {
 	var errs []error
 	if c.URL == "" {
 		errs = append(errs, errors.New("url is required"))
-	} else if u, err := url.Parse(c.URL); err != nil || u.Scheme == "" || u.Host == "" {
-		errs = append(errs, fmt.Errorf("url must be a valid URL: %q", c.URL))
+	} else if err := base_config.ValidateURL(c.URL); err != nil {
+		errs = append(errs, err)
 	}
 	if c.APIKey == "" {
 		errs = append(errs, errors.New("api-key is required"))
