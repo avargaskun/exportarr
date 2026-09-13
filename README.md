@@ -6,6 +6,19 @@ AIO Prometheus Exporter for Sonarr, Radarr, Lidarr, Prowlarr, Bazarr and Sabnzbd
 
 Note: This exporter will not gather metrics from all apps at once. You will need an `exportarr` instance for each app. Be sure to see the examples below for more information.
 
+## About this fork
+
+This is [avargaskun/exportarr](https://github.com/avargaskun/exportarr), a fork of [onedr0p/exportarr](https://github.com/onedr0p/exportarr). It ships upstream's v3 rewrite, which upstream merged but has not released, plus security and availability hardening. It stays close to upstream so switching back is cheap once upstream releases v3.
+
+- **Image:** `ghcr.io/avargaskun/exportarr` for `linux/amd64` and `linux/arm64`. It is built only by this repository's CI from reviewed source, and publishing requires tests and lint to pass on the release commit.
+- **Tags:** `X.Y.Z` (pin this), `X.Y`, `X` and `latest`, with no `v` prefix. Git tags and GitHub releases are `vX.Y.Z`.
+- **Releases:** [release-please](https://github.com/googleapis/release-please) cuts releases from conventional commits on `dev`: `fix:` bumps the patch version, `feat:` the minor. The major version tracks upstream's. The first release is `3.1.0`, because upstream's unreleased v3 would be `3.0.0`.
+- **Differences from upstream v3 (`52bb6eb`):**
+  - Image: no UPX or catatonit, `ENTRYPOINT ["/exportarr"]`, `scratch` plus the CA bundle, UID `65532`, embedded tzdata, patched Go.
+  - The default port is `9707` for both the binary and the image (upstream's code said `8081`).
+  - New settings: `SCRAPE_TIMEOUT`, `SERIES_CONCURRENCY` and `PROXY_FROM_ENV` (see [Configuration](#configuration)).
+  - Hardening: environment proxies are ignored by default, and URLs with credentials or query strings are rejected. Secrets stay out of logs and redirect errors. Response bodies are capped at 256 MiB, and queue pagination and the Sonarr/Lidarr fan-out are bounded. Concurrent and overlong `/metrics` scrapes are limited, the HTTP server has timeouts, and shell completion is removed.
+
 ![image](.github/images/dashboard-2.png)
 
 ## Usage
@@ -22,6 +35,8 @@ See examples in the [examples/kubernetes](./examples/kubernetes/) directory.
 
 _Replace `$app` and `$port` with one of the supported apps and its port, and put the app's API key in `./api_key`_
 
+<!-- x-release-please-start-version -->
+
 ```sh
 # PORT must be unique across all Exportarr instances.
 # ./api_key must be readable by UID 65532, the container user.
@@ -32,8 +47,10 @@ docker run --name exportarr_$app \
   -v "$PWD/api_key:/run/secrets/api_key:ro" \
   --restart unless-stopped \
   -p 9707:9707 \
-  -d ghcr.io/onedr0p/exportarr:latest $app
+  -d ghcr.io/avargaskun/exportarr:3.1.0 $app
 ```
+
+<!-- x-release-please-end -->
 
 Visit http://127.0.0.1:9707/metrics to see the app metrics
 
@@ -116,6 +133,34 @@ Measured against real instances with **every metric enabled** — use these scal
 - **Memory** scales with the largest API payload decoded: expect roughly 25–100 MB RSS, with the high end during bazarr's episode walk or a large radarr movie list. In Kubernetes, set `GOMEMLIMIT` to the container memory limit so GC stays ahead of the decode spike, and watch the exporter's own `go_*`/`process_*` metrics.
 - If a scrape is too slow, reach for the `DISABLE_*` flags above rather than a shorter `REQUEST_TIMEOUT` — they remove the expensive endpoints entirely instead of cutting requests off mid-flight.
 
+## Alerting
+
+`up` only tells you the exporter answered. Whether the app is reachable and its collectors succeed is reported inside the scrape:
+
+- `<app>_system_status` is `1` while the app answers its status endpoint and `0` when it doesn't.
+- `<app>_*collector_error` is `1` for each failing collector and absent otherwise.
+
+Write rules over a window of at least **two scrape intervals**, and don't rely on `for:`. That matters with long intervals such as 15 minutes:
+
+- An instant expression only sees a series for Prometheus's 5-minute lookback after each scrape, so a `for:` longer than that never fires, and `*_collector_error > 0` flickers at best.
+- `max_over_time({__name__=~".+_collector_error"}[30m])` drops the metric name, so all of a target's error gauges collapse into one labelset and the query fails. Copy the name into a label first, as below, or write one rule per gauge.
+
+```yaml
+groups:
+  - name: exportarr
+    rules:
+      # 30m = 2 × a 15m scrape interval; adjust the job and app names.
+      - alert: ArrUnreachable
+        expr: max_over_time(sonarr_system_status[30m]) < 1
+      - alert: ArrCollectorFailing
+        expr: |
+          max_over_time(
+            label_replace({__name__=~"sonarr_.*collector_error"}, "collector", "$1", "__name__", "(.+)")[30m:]
+          ) > 0
+      - alert: ExporterDown
+        expr: max_over_time(up{job="sonarr-exporter"}[30m]) < 1
+```
+
 ## Upgrading from v2 to v3
 
 v3 is a breaking release. Review each section before upgrading.
@@ -124,7 +169,7 @@ v3 is a breaking release. Review each section before upgrading.
 
 - **Readarr support** — the `readarr` command, its metrics, and its dashboard panels are gone (Readarr was retired upstream).
 - **Basic auth** — HTTP basic auth and the `--basic-auth-username`/`--basic-auth-password` flags are removed. `AUTH_USERNAME`/`AUTH_PASSWORD` now apply to form auth only and require `FORM_AUTH=true`; setting credentials without form auth is a startup error.
-- **config.xml parsing** — `CONFIG`/`--config` is removed; exportarr no longer reads the \*arr's config file. Provide the key via `API_KEY`/`--api-key`, or `API_KEY_FILE` (environment-only) for Docker and Kubernetes secrets mounted as files.
+- **config.xml parsing** — `CONFIG`/`--config` is removed; exportarr no longer reads the \*arr's config file. Provide the key via `API_KEY_FILE` (environment-only; the `--api-key-file` flag is gone) for Docker and Kubernetes secrets mounted as files, or via `API_KEY`.
 - **Legacy variable aliases** — `APIKEY`, `APIKEY_FILE`, `BASIC_AUTH_USERNAME` and `BASIC_AUTH_PASSWORD` no longer work.
 - **Log levels** — `fatal`, `panic` and `dpanic` are gone; valid levels are `debug`, `info`, `warn`, `error`.
 - **`ENABLE_ADDITIONAL_METRICS`** — removed. The metrics it bundled are now collected **by default** (the per-item fan-out is parallelized and ~10× faster), with granular opt-outs instead: `DISABLE_QUALITY_METRICS`, `DISABLE_EPISODE_METRICS`, `DISABLE_ALBUM_METRICS`. Set all that apply to restore v2's default-off behavior.
@@ -132,7 +177,7 @@ v3 is a breaking release. Review each section before upgrading.
 | v2                                   | v3                                                                                         |
 | ------------------------------------ | ------------------------------------------------------------------------------------------ |
 | `APIKEY`                             | `API_KEY`                                                                                  |
-| `API_KEY_FILE=/path`                 | unchanged — still supported (Docker/Kubernetes secrets)                                    |
+| `API_KEY_FILE=/path`                 | still supported as an environment variable; the `--api-key-file` flag was removed          |
 | `CONFIG=/path/config.xml`            | `URL` + `API_KEY`                                                                          |
 | `BASIC_AUTH_USERNAME`/`..._PASSWORD` | removed — form auth uses `AUTH_USERNAME`/`AUTH_PASSWORD` + `FORM_AUTH=true`                |
 | `LOG_LEVEL=fatal`                    | `LOG_LEVEL=error`                                                                          |
@@ -141,7 +186,7 @@ v3 is a breaking release. Review each section before upgrading.
 
 ### Changed scrape behavior — update your alerts
 
-- A failing collector no longer fails the whole scrape with HTTP 500. `/metrics` now returns 200 with everything that succeeded, plus a per-collector error gauge (e.g. `radarr_collector_error`, `radarr_queue_collector_error`) set to `1` for whatever failed. Alerts that relied on the target reporting `up == 0` when the app was down should alert on `*_collector_error > 0` instead.
+- A failing collector no longer fails the whole scrape with HTTP 500. `/metrics` now returns 200 with everything that succeeded, plus a per-collector error gauge (e.g. `radarr_collector_error`, `radarr_queue_collector_error`) set to `1` for whatever failed; the gauge is absent while the collector is healthy. System status is the exception: an unreachable app shows up as `<app>_system_status 0`, while `<app>_status_collector_error` only appears if that collector panics. Alerts that relied on `up == 0` when the app was down need new rules; see [Alerting](#alerting).
 - `sabnzbd_collector_error` renamed its `target` label to `url`, matching every other metric.
 - Overlapping scrapes never stack walks onto the app, the failure mode behind bazarr CPU drainage ([#380](https://github.com/onedr0p/exportarr/issues/380)): a scrape that arrives while a collection is still running waits for it and is served the same result.
 - `/metrics` serves at most two scrapes at once and answers `503` to any more, and to a scrape that exceeds `SCRAPE_TIMEOUT`. Every collector abandons its requests shortly before that deadline and raises its error gauge (system status reports `0`), so the scrape still returns whatever finished. Only `GET` (and `HEAD`) is accepted.

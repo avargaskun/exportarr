@@ -215,9 +215,9 @@ const maxScrapesInFlight = 2
 
 func newHandler(conf *config.Config, registry *prometheus.Registry) http.Handler {
 	// Serve partial metrics when a collector fails rather than failing the
-	// whole scrape; collectors surface failures via their *_collector_error
-	// gauges. Scrape bookkeeping wraps only /metrics so health probes don't
-	// pollute it.
+	// whole scrape. Collectors report failures via *_collector_error gauges,
+	// except system status, which reports <app>_system_status 0. Scrape
+	// bookkeeping wraps only /metrics so health probes don't pollute it.
 	metricsHandler := promhttp.HandlerFor(&sharedGatherer{inner: registry}, promhttp.HandlerOpts{
 		ErrorHandling:       promhttp.ContinueOnError,
 		ErrorLog:            promhttpLogger{},
