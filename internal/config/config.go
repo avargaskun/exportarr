@@ -39,7 +39,7 @@ type Config struct {
 	// APIKeyFromFile receives the *contents* of the file named by API_KEY_FILE
 	// (the env library's `file` option) — Docker/Kubernetes secrets mounts.
 	APIKeyFromFile   string        `env:"API_KEY_FILE,file,unset"`
-	Port             int           `env:"PORT" envDefault:"8081"`
+	Port             int           `env:"PORT" envDefault:"9707"`
 	Interface        string        `env:"INTERFACE" envDefault:"0.0.0.0"`
 	DisableSSLVerify bool          `env:"DISABLE_SSL_VERIFY"`
 	RequestTimeout   time.Duration `env:"REQUEST_TIMEOUT" envDefault:"60s"`

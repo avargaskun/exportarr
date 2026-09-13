@@ -55,7 +55,7 @@ Visit http://127.0.0.1:9707/metrics to see the app metrics
 
 |        Environment Variable        | CLI Flag                       | Description                                                                                                               | Default              | Required |
 | :--------------------------------: | ------------------------------ | ------------------------------------------------------------------------------------------------------------------------- | -------------------- | :------: |
-|               `PORT`               | `--port` or `-p`               | The port Exportarr will listen on                                                                                         | `8081`               |    ❌    |
+|               `PORT`               | `--port` or `-p`               | The port Exportarr will listen on                                                                                         | `9707`               |    ❌    |
 |               `URL`                | `--url` or `-u`                | The full URL to the app being exported                                                                                    |                      |    ✅    |
 |             `API_KEY`              | `--api-key` or `-a`            | API Key for the app being exported                                                                                        |                      |    ✅    |
 |           `API_KEY_FILE`           | —                              | Path to a file containing the API key (Docker/Kubernetes secrets); overrides `API_KEY`                                    |                      |    ❌    |

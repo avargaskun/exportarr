@@ -1,5 +1,5 @@
 [tools]
-go = "1.26.4"
+go = "1.26.8"
 golangci-lint = "2.12.2"
 oxfmt = "0.53.0"
 zizmor = "1.25.2"
