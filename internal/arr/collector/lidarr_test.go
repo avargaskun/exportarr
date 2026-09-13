@@ -89,7 +89,7 @@ func TestLidarrCollect_FailureDoesntPanic(t *testing.T) {
 	}
 	cl, err := client.NewClient(config)
 	assert.NoError(t, err)
-	collector := NewRadarrCollector(cl, config)
+	collector := NewLidarrCollector(cl, config)
 
 	f := strings.NewReader("")
 
