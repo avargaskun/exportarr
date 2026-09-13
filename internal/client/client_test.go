@@ -1,13 +1,16 @@
 package client
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"github.com/onedr0p/exportarr/internal/assert"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestNewClient(t *testing.T) {
@@ -128,4 +131,24 @@ func TestDoRequest_ResponseTooLarge(t *testing.T) {
 	client.maxBodyBytes = 4096
 	assert.NoError(t, client.DoRequest("test", &out))
 	assert.Equal(t, len(out), 1)
+}
+
+func TestDoRequest_RedactsURLInErrorsAndLogs(t *testing.T) {
+	var logs bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	defer slog.SetDefault(prev)
+
+	ts := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	addr := ts.URL
+	ts.Close()
+
+	client, err := NewClient(addr+"/base", TransportOptions{}, time.Second, nil)
+	assert.NoError(t, err)
+	err = client.DoRequest("queue", nil, QueryParams{"token": {"hunter2"}})
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), addr+"/base/queue")
+	assert.NotContains(t, err.Error(), "hunter2")
+	assert.Contains(t, logs.String(), addr+"/base/queue")
+	assert.NotContains(t, logs.String(), "hunter2")
 }

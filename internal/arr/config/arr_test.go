@@ -277,6 +277,24 @@ func TestValidate(t *testing.T) {
 			valid: true,
 		},
 		{
+			name: "url-with-credentials",
+			config: &ArrConfig{ //nolint:gosec // rejected-credentials fixture
+				URL:               "http://user:pass@localhost",
+				APIKey:            "abcdef0123456789abcdef0123456789",
+				SeriesConcurrency: 10,
+			},
+			valid: false,
+		},
+		{
+			name: "url-with-query",
+			config: &ArrConfig{
+				URL:               "http://localhost/?apikey=abcdef0123456789abcdef0123456789",
+				APIKey:            "abcdef0123456789abcdef0123456789",
+				SeriesConcurrency: 10,
+			},
+			valid: false,
+		},
+		{
 			name: "form-auth-needs-user-and-password",
 			config: &ArrConfig{
 				URL:        "http://localhost",

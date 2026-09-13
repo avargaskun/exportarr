@@ -109,8 +109,8 @@ func (c *ArrConfig) Validate() error {
 	var errs []error
 	if c.URL == "" {
 		errs = append(errs, errors.New("url is required"))
-	} else if u, err := url.Parse(c.URL); err != nil || u.Scheme == "" || u.Host == "" {
-		errs = append(errs, fmt.Errorf("url must be a valid URL: %q", c.URL))
+	} else if err := base_config.ValidateURL(c.URL); err != nil {
+		errs = append(errs, err)
 	}
 	if !apiKeyRegex.MatchString(c.APIKey) {
 		errs = append(errs, errors.New("api-key must be a 20-32 character alphanumeric string"))

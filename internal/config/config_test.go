@@ -252,3 +252,30 @@ func TestValidate(t *testing.T) {
 		})
 	}
 }
+
+func TestValidateURL(t *testing.T) {
+	for _, tc := range []struct {
+		url   string
+		valid bool
+	}{
+		{"http://localhost:8989", true},
+		{"https://sonarr.example.com/sonarr", true},
+		{"http://[::1]:8989", true},
+		{"localhost:8989", false},
+		{"/sonarr", false},
+		{"http://user:hunter2@localhost:8989", false},
+		{"http://user@localhost:8989", false},
+		{"http://localhost:8989/?apikey=hunter2", false},
+		{"http://localhost:8989/?", false},
+	} {
+		t.Run(tc.url, func(t *testing.T) {
+			err := ValidateURL(tc.url)
+			if tc.valid {
+				assert.NoError(t, err)
+				return
+			}
+			assert.Error(t, err)
+			assert.NotContains(t, err.Error(), "hunter2")
+		})
+	}
+}

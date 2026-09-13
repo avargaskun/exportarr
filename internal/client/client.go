@@ -123,20 +123,25 @@ func (c *Client) DoRequestContext(ctx context.Context, endpoint string, target a
 
 	endpointURL := c.URL.JoinPath(endpoint)
 	endpointURL.RawQuery = values.Encode()
-	slog.Debug("Sending HTTP request", "url", endpointURL)
+	logURL := redactURL(endpointURL)
+	slog.Debug("Sending HTTP request", "url", logURL)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpointURL.String(), nil)
 	if err != nil {
-		return fmt.Errorf("failed to create HTTP Request(%s): %w", endpointURL, err)
+		return fmt.Errorf("failed to create HTTP Request(%s): %w", logURL, err)
 	}
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return fmt.Errorf("failed to execute HTTP Request(%s): %w", endpointURL, err)
+		// *url.Error repeats the full URL; the redacted one is already in the message.
+		if uerr := (*url.Error)(nil); errors.As(err, &uerr) {
+			err = uerr.Err
+		}
+		return fmt.Errorf("failed to execute HTTP Request(%s): %w", logURL, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	err = c.unmarshalBody(http.MaxBytesReader(nil, resp.Body, c.maxBodyBytes), target)
 	if tooLarge := (*http.MaxBytesError)(nil); errors.As(err, &tooLarge) {
-		return fmt.Errorf("response from %s exceeds %d bytes", endpointURL, tooLarge.Limit)
+		return fmt.Errorf("response from %s exceeds %d bytes", logURL, tooLarge.Limit)
 	}
 	return err
 }
@@ -153,6 +158,12 @@ func GetContext[T any](ctx context.Context, c *Client, endpoint string, queryPar
 	var out T
 	err := c.DoRequestContext(ctx, endpoint, &out, queryParams...)
 	return out, err
+}
+
+// redactURL renders u as scheme://host[:port]/path, dropping the userinfo,
+// query and fragment, any of which can carry credentials.
+func redactURL(u *url.URL) string {
+	return (&url.URL{Scheme: u.Scheme, Host: u.Host, Path: u.Path}).String()
 }
 
 // BaseTransport returns a clone of the default transport configured by opts.

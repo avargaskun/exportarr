@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"net/url"
 	"strings"
 	"time"
 
@@ -97,6 +98,22 @@ func LoadConfig(flags *flag.FlagSet) (*Config, error) {
 		out.APIKey = strings.TrimSpace(out.APIKeyFromFile)
 	}
 	return out, nil
+}
+
+// ValidateURL checks a target app URL. Credentials and query strings are
+// rejected because the URL is the url label on every series and is logged;
+// errors never echo the URL for the same reason.
+func ValidateURL(raw string) error {
+	u, err := url.Parse(raw)
+	switch {
+	case err != nil || u.Scheme == "" || u.Host == "":
+		return errors.New("url must be an absolute URL (scheme://host[:port][/path])")
+	case u.User != nil:
+		return errors.New("url must not contain credentials; use API_KEY_FILE/API_KEY or form auth")
+	case u.RawQuery != "" || u.ForceQuery:
+		return errors.New("url must not contain a query string")
+	}
+	return nil
 }
 
 // Validate checks the configuration against its validation rules.
