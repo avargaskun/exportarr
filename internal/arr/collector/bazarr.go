@@ -159,7 +159,7 @@ func (collector *bazarrCollector) Describe(ch chan<- *prometheus.Desc) {
 }
 
 func (collector *bazarrCollector) Collect(ch chan<- prometheus.Metric) {
-	log := slog.With("collector", "bazarr")
+	log := collectorLogger(collector.config, "bazarr")
 	defer recoverCollect(log, ch, collector.errorMetric)
 	// If a previous collection is still running (slow target, overlapping
 	// scrapes), skip this one instead of stacking more load onto the app —
@@ -209,7 +209,7 @@ func (collector *bazarrCollector) episodeMovieMetrics(ch chan<- prometheus.Metri
 	var wg sync.WaitGroup
 	if !collector.config.DisableEpisodeMetrics {
 		wg.Go(func() {
-			defer recoverCollect(slog.With("collector", "bazarr"), ch, collector.errorMetric)
+			defer recoverCollect(collectorLogger(collector.config, "bazarr"), ch, collector.errorMetric)
 			episodeStats = collector.collectEpisodeStats(ch, c)
 		})
 	} else if badges != nil {
@@ -220,7 +220,7 @@ func (collector *bazarrCollector) episodeMovieMetrics(ch chan<- prometheus.Metri
 		ch <- prometheus.MustNewConstMetric(collector.episodeSubtitlesMissingMetric, prometheus.GaugeValue, float64(badges.Episodes))
 	}
 	wg.Go(func() {
-		defer recoverCollect(slog.With("collector", "bazarr"), ch, collector.errorMetric)
+		defer recoverCollect(collectorLogger(collector.config, "bazarr"), ch, collector.errorMetric)
 		movieStats = collector.collectMovieStats(ch, c)
 	})
 	wg.Wait()
@@ -308,7 +308,7 @@ func emitMergedCounts(ch chan<- prometheus.Metric, desc *prometheus.Desc, dst, s
 }
 
 func (collector *bazarrCollector) collectEpisodeStats(ch chan<- prometheus.Metric, c *client.Client) *stats {
-	log := slog.With("collector", "bazarr")
+	log := collectorLogger(collector.config, "bazarr")
 	episodeStats := newStats()
 
 	mseries := time.Now()
@@ -403,7 +403,7 @@ func (collector *bazarrCollector) collectEpisodeStats(ch chan<- prometheus.Metri
 }
 
 func (collector *bazarrCollector) collectMovieStats(ch chan<- prometheus.Metric, c *client.Client) *stats {
-	log := slog.With("collector", "bazarr")
+	log := collectorLogger(collector.config, "bazarr")
 	mseries := time.Now()
 	movieStats := new(stats)
 	movieStats.languages = make(map[string]int)
@@ -485,7 +485,7 @@ func (collector *bazarrCollector) collectMovieStats(ch chan<- prometheus.Metric,
 }
 
 func (collector *bazarrCollector) systemMetrics(ch chan<- prometheus.Metric, c *client.Client, badges *model.BazarrBadges) {
-	log := slog.With("collector", "bazarr")
+	log := collectorLogger(collector.config, "bazarr")
 
 	health, err := client.Get[model.BazarrHealth](c, "system/health")
 	if err != nil {

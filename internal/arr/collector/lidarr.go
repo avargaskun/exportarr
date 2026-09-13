@@ -2,7 +2,6 @@ package collector
 
 import (
 	"fmt"
-	"log/slog"
 	"strconv"
 	"sync"
 
@@ -70,7 +69,7 @@ func (collector *lidarrCollector) Describe(ch chan<- *prometheus.Desc) {
 }
 
 func (collector *lidarrCollector) Collect(ch chan<- prometheus.Metric) {
-	log := slog.With("collector", "lidarr")
+	log := collectorLogger(collector.config, "lidarr")
 	defer recoverCollect(log, ch, collector.errorMetric)
 	// If a previous collection is still running (slow target, overlapping
 	// scrapes), skip this one instead of stacking more load onto the app —

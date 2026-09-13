@@ -62,6 +62,7 @@ type ArrConfig struct {
 	CollectTimeout          time.Duration  `env:"-"` // from the base config
 	Prowlarr                ProwlarrConfig `envPrefix:"PROWLARR__"`
 	Bazarr                  BazarrConfig   `envPrefix:"BAZARR__"`
+	Target                  string         `env:"-"` // empty in single-target mode
 }
 
 // UseFormAuth reports whether form-based authentication is enabled.

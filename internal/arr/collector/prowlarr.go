@@ -1,7 +1,6 @@
 package collector
 
 import (
-	"log/slog"
 	"strings"
 	"sync"
 	"time"
@@ -149,7 +148,7 @@ func (collector *prowlarrCollector) Describe(ch chan<- *prometheus.Desc) {
 
 func (collector *prowlarrCollector) Collect(ch chan<- prometheus.Metric) {
 	total := time.Now()
-	log := slog.With("collector", "prowlarr")
+	log := collectorLogger(collector.config, "prowlarr")
 	defer recoverCollect(log, ch, collector.errorMetric)
 	ctx, cancel := collectContext(collector.config)
 	defer cancel()

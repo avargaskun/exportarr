@@ -44,6 +44,15 @@ func recoverCollect(log *slog.Logger, ch chan<- prometheus.Metric, errorMetric *
 	}
 }
 
+// collectorLogger adds the target name only in serve mode, so single-target lines stay byte-identical.
+func collectorLogger(conf *config.ArrConfig, name string) *slog.Logger {
+	log := slog.With("collector", name)
+	if conf.Target != "" {
+		log = log.With("target", conf.Target)
+	}
+	return log
+}
+
 // seriesConcurrency is the per-item API fan-out used by the sonarr and lidarr
 // collectors, falling back to the default for configs not built by
 // LoadArrConfig.

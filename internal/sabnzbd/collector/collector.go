@@ -199,6 +199,7 @@ type SabnzbdCollector struct {
 	client                   *client.Client
 	baseURL                  string
 	collectTimeout           time.Duration
+	target                   string
 	queueQueryDuration       prometheus.Histogram
 	serverStatsQueryDuration prometheus.Histogram
 }
@@ -222,6 +223,7 @@ func NewSabnzbdCollector(config *config.SabnzbdConfig) (*SabnzbdCollector, error
 		client:                   client,
 		baseURL:                  config.URL,
 		collectTimeout:           config.CollectTimeout,
+		target:                   config.Target,
 		queueQueryDuration:       newQueryDurationHistogram("queue", config.URL),
 		serverStatsQueryDuration: newQueryDurationHistogram("server_stats", config.URL),
 	}, nil
@@ -291,6 +293,9 @@ func (s *SabnzbdCollector) Describe(ch chan<- *prometheus.Desc) {
 // Collect implements prometheus.Collector.
 func (s *SabnzbdCollector) Collect(ch chan<- prometheus.Metric) {
 	log := slog.With("collector", "sabnzbd")
+	if s.target != "" {
+		log = log.With("target", s.target)
+	}
 	// A panic in a collector goroutine would crash the whole exporter: degrade
 	// to the error gauge instead.
 	defer func() {

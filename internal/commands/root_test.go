@@ -466,3 +466,83 @@ func TestServeHTTP_GracefulShutdownFailure(t *testing.T) {
 	close(blocking.release)
 	assert.Equal(t, <-scraped, http.StatusOK)
 }
+
+// captureSlog swaps slog.Default for a text handler without timestamps.
+func captureSlog(t *testing.T) *syncBuffer {
+	t.Helper()
+	saveLogging(t)
+	buf := &syncBuffer{}
+	slog.SetDefault(slog.New(slog.NewTextHandler(buf, &slog.HandlerOptions{
+		ReplaceAttr: func(groups []string, a slog.Attr) slog.Attr {
+			if len(groups) == 0 && a.Key == slog.TimeKey {
+				return slog.Attr{}
+			}
+			return a
+		},
+	})))
+	return buf
+}
+
+func TestPromhttpLogger_NoTargetIsByteIdentical(t *testing.T) {
+	logs := captureSlog(t)
+	promhttpLogger{}.Println("x")
+	slog.Error("x\n")
+	lines := strings.SplitAfter(logs.String(), "\n")
+	assert.Len(t, lines, 3)
+	assert.Equal(t, lines[0], lines[1])
+	assert.Equal(t, lines[0], "level=ERROR msg=\"x\\n\"\n")
+}
+
+func TestPromhttpLogger_WithTarget(t *testing.T) {
+	logs := captureSlog(t)
+	promhttpLogger{target: "t"}.Println("error gathering metrics:", errors.New("boom"))
+	assert.Equal(t, logs.String(), "level=ERROR msg=\"error gathering metrics: boom\\n\" target=t\n")
+}
+
+// invalidCollector sends a metric that fails the gather.
+type invalidCollector struct{ desc *prometheus.Desc }
+
+func (c invalidCollector) Describe(ch chan<- *prometheus.Desc) { ch <- c.desc }
+
+func (c invalidCollector) Collect(ch chan<- prometheus.Metric) {
+	ch <- prometheus.NewInvalidMetric(c.desc, errors.New("broken metric"))
+}
+
+func TestNewMetricsHandler_GatherErrorLogsTarget(t *testing.T) {
+	for _, target := range []string{"", "sonarr-hd"} {
+		t.Run("target="+target, func(t *testing.T) {
+			logs := captureSlog(t)
+			registry := prometheus.NewRegistry()
+			registry.MustRegister(
+				invalidCollector{desc: prometheus.NewDesc("invalid", "test", nil, nil)},
+				constCollector{desc: prometheus.NewDesc("fine", "test", nil, nil)},
+			)
+			ts := httptest.NewServer(newMetricsHandler(stackOpts{
+				app:           "sonarr",
+				url:           "http://sonarr:8989",
+				target:        target,
+				scrapeTimeout: time.Minute,
+			}, registry))
+			t.Cleanup(ts.Close)
+
+			code, body := get(t, http.MethodGet, ts.URL)
+			assert.Equal(t, code, http.StatusOK)
+			assert.Contains(t, body, "fine ")
+
+			var errorLines int
+			for line := range strings.Lines(logs.String()) {
+				if !strings.HasPrefix(line, "level=ERROR") {
+					continue
+				}
+				errorLines++
+				assert.Contains(t, line, "broken metric")
+				if target == "" {
+					assert.NotContains(t, line, "target=")
+				} else {
+					assert.True(t, strings.HasSuffix(line, " target="+target+"\n"), "line %q lacks target", line)
+				}
+			}
+			assert.Equal(t, errorLines, 1)
+		})
+	}
+}

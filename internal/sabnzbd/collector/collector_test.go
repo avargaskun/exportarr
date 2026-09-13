@@ -1,11 +1,14 @@
 package collector
 
 import (
+	"bytes"
 	"github.com/onedr0p/exportarr/internal/assert"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -132,4 +135,65 @@ func TestCollect_StopsAtCollectTimeout(t *testing.T) {
 	start := time.Now()
 	assert.Equal(t, testutil.CollectAndCount(collector, "sabnzbd_collector_error"), 1)
 	assert.True(t, time.Since(start) < 5*time.Second, "collection took %s", time.Since(start))
+}
+
+func captureDefaultLog(t *testing.T) *syncBuffer {
+	t.Helper()
+	saved := slog.Default()
+	t.Cleanup(func() { slog.SetDefault(saved) })
+	buf := &syncBuffer{}
+	slog.SetDefault(slog.New(slog.NewTextHandler(buf, nil)))
+	return buf
+}
+
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *syncBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *syncBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
+func TestCollect_ErrorLinesCarryTarget(t *testing.T) {
+	for _, target := range []string{"", "sab-main"} {
+		t.Run("target="+target, func(t *testing.T) {
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(http.StatusBadRequest)
+			}))
+			defer ts.Close()
+
+			collector, err := NewSabnzbdCollector(&config.SabnzbdConfig{
+				URL:    ts.URL,
+				APIKey: testAPIKey,
+				Target: target,
+			})
+			assert.NoError(t, err)
+
+			logs := captureDefaultLog(t)
+			assert.Equal(t, testutil.CollectAndCount(collector, "sabnzbd_collector_error"), 1)
+
+			var errorLines int
+			for line := range strings.Lines(logs.String()) {
+				if !strings.Contains(line, "level=ERROR") {
+					continue
+				}
+				errorLines++
+				if target == "" {
+					assert.NotContains(t, line, "target=")
+				} else {
+					assert.Contains(t, line, "target="+target)
+				}
+			}
+			assert.True(t, errorLines > 0, "no error lines in:\n%s", logs.String())
+		})
+	}
 }

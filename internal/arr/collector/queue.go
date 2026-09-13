@@ -1,7 +1,6 @@
 package collector
 
 import (
-	"log/slog"
 	"strconv"
 
 	"github.com/onedr0p/exportarr/internal/arr/client"
@@ -41,7 +40,7 @@ func (collector *queueCollector) Describe(ch chan<- *prometheus.Desc) {
 }
 
 func (collector *queueCollector) Collect(ch chan<- prometheus.Metric) {
-	log := slog.With("collector", "queue")
+	log := collectorLogger(collector.config, "queue")
 	defer recoverCollect(log, ch, collector.errorMetric)
 	ctx, cancel := collectContext(collector.config)
 	defer cancel()

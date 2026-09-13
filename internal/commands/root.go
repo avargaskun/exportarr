@@ -128,11 +128,17 @@ func warnSecretFlags(log *slog.Logger, flags *pflag.FlagSet) {
 }
 
 // promhttpLogger routes promhttp's internal gather errors to slog.
-type promhttpLogger struct{}
+type promhttpLogger struct {
+	target string
+}
 
 // Println implements promhttp.Logger.
-func (promhttpLogger) Println(v ...any) {
-	slog.Error(fmt.Sprintln(v...))
+func (p promhttpLogger) Println(v ...any) {
+	if p.target == "" {
+		slog.Error(fmt.Sprintln(v...))
+		return
+	}
+	slog.Error(fmt.Sprintln(v...), "target", p.target)
 }
 
 // newServer bounds every phase of a connection so a stalled or slow client
@@ -210,8 +216,8 @@ const maxScrapesInFlight = 2
 
 // stackOpts describes one scrape target's /metrics stack.
 type stackOpts struct {
-	app, url      string
-	scrapeTimeout time.Duration
+	app, url, target string
+	scrapeTimeout    time.Duration
 }
 
 func newMetricsHandler(o stackOpts, registry *prometheus.Registry) http.Handler {
@@ -220,7 +226,7 @@ func newMetricsHandler(o stackOpts, registry *prometheus.Registry) http.Handler 
 	// except system status, which reports <app>_system_status 0.
 	h := promhttp.HandlerFor(&sharedGatherer{inner: registry}, promhttp.HandlerOpts{
 		ErrorHandling:       promhttp.ContinueOnError,
-		ErrorLog:            promhttpLogger{},
+		ErrorLog:            promhttpLogger{target: o.target},
 		MaxRequestsInFlight: maxScrapesInFlight,
 		Timeout:             o.scrapeTimeout,
 		// Exposes promhttp_metric_handler_errors_total for gather errors.

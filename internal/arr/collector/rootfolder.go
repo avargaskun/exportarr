@@ -1,8 +1,6 @@
 package collector
 
 import (
-	"log/slog"
-
 	"github.com/onedr0p/exportarr/internal/arr/client"
 	"github.com/onedr0p/exportarr/internal/arr/config"
 	"github.com/onedr0p/exportarr/internal/arr/model"
@@ -32,7 +30,7 @@ func (collector *rootFolderCollector) Describe(ch chan<- *prometheus.Desc) {
 }
 
 func (collector *rootFolderCollector) Collect(ch chan<- prometheus.Metric) {
-	log := slog.With("collector", "rootfolder")
+	log := collectorLogger(collector.config, "rootfolder")
 	defer recoverCollect(log, ch, collector.errorMetric)
 	ctx, cancel := collectContext(collector.config)
 	defer cancel()

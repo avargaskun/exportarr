@@ -1,7 +1,6 @@
 package collector
 
 import (
-	"log/slog"
 	"strconv"
 
 	"github.com/onedr0p/exportarr/internal/arr/client"
@@ -63,7 +62,7 @@ func (collector *radarrCollector) Describe(ch chan<- *prometheus.Desc) {
 }
 
 func (collector *radarrCollector) Collect(ch chan<- prometheus.Metric) {
-	log := slog.With("collector", "radarr")
+	log := collectorLogger(collector.config, "radarr")
 	defer recoverCollect(log, ch, collector.errorMetric)
 	ctx, cancel := collectContext(collector.config)
 	defer cancel()

@@ -367,6 +367,7 @@ func TestApplyBase(t *testing.T) {
 			BackfillSinceTime: time.Date(2021, 1, 1, 0, 0, 0, 0, time.UTC),
 		},
 		Bazarr: BazarrConfig{SeriesBatchSize: 7, SeriesBatchConcurrency: 8},
+		Target: "radarr-4k",
 	}
 	empty := filled
 	empty.DisableSSLVerify = false

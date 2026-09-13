@@ -16,6 +16,7 @@ type SabnzbdConfig struct {
 	ProxyFromEnv     bool
 	RequestTimeout   time.Duration
 	CollectTimeout   time.Duration
+	Target           string // empty in single-target mode
 }
 
 // LoadSabnzbdConfig builds a SabnzbdConfig from the base configuration.
