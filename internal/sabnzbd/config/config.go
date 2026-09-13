@@ -5,6 +5,7 @@ import (
 	"errors"
 	"time"
 
+	"github.com/onedr0p/exportarr/internal/client"
 	base_config "github.com/onedr0p/exportarr/internal/config"
 )
 
@@ -16,7 +17,8 @@ type SabnzbdConfig struct {
 	ProxyFromEnv     bool
 	RequestTimeout   time.Duration
 	CollectTimeout   time.Duration
-	Target           string // empty in single-target mode
+	Target           string         // empty in single-target mode
+	UpstreamLimiter  client.Limiter // nil (unlimited) in single-target mode
 }
 
 // LoadSabnzbdConfig builds a SabnzbdConfig from the base configuration.

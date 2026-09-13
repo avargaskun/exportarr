@@ -37,8 +37,12 @@ func TestLoadSabnzbdConfig_CopiesBaseFields(t *testing.T) {
 	v := reflect.ValueOf(*got)
 	for i := range v.NumField() {
 		name := v.Type().Field(i).Name
-		if name == "Target" {
+		switch name {
+		case "Target":
 			assert.Equal(t, got.Target, "", "the target name is set by the caller")
+			continue
+		case "UpstreamLimiter":
+			assert.Nil(t, got.UpstreamLimiter, "the limiter is set by the caller")
 			continue
 		}
 		assert.False(t, v.Field(i).IsZero(), "field %s not copied from the base config", name)

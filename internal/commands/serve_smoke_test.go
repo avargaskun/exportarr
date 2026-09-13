@@ -1,14 +1,18 @@
 package commands
 
 import (
+	"errors"
 	"maps"
 	"net/http"
 	"os"
+	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/onedr0p/exportarr/internal/assert"
+	"github.com/onedr0p/exportarr/internal/client"
 	"github.com/onedr0p/exportarr/internal/fixtures"
 )
 
@@ -47,6 +51,15 @@ func TestServe_Smoke(t *testing.T) {
 	assert.Contains(t, body, "go_goroutines")
 	assert.NotContains(t, body, "sonarr_")
 	assert.NotContains(t, body, "sabnzbd_")
+	assert.Contains(t, body, "exportarr_upstream_requests_max 64\n")
+	for _, name := range []string{"sonarr-hd", "sab"} {
+		assert.Contains(t, body, `exportarr_upstream_requests_in_flight{target="`+name+`"} 0`+"\n")
+		m := regexp.MustCompile(`exportarr_upstream_slot_wait_seconds_count\{target="` + name + `"\} (\d+)\n`).FindStringSubmatch(body)
+		assert.True(t, m != nil, "no slot wait count for %s", name)
+		waits, err := strconv.Atoi(m[1])
+		assert.NoError(t, err)
+		assert.True(t, waits > 0, "%s took no upstream slot", name)
+	}
 
 	code, body = rc.Get("/")
 	assert.Equal(t, code, http.StatusOK)
@@ -133,4 +146,32 @@ func TestServe_ProcessErrorStillScrubsTargetSecrets(t *testing.T) {
 	}
 	assert.NotContains(t, res.Err.Error(), smokeKey)
 	assert.NotContains(t, res.Err.Error(), "hunter2")
+}
+
+func TestServe_SlotPoolErrorFailsClosed(t *testing.T) {
+	saved := newSlotPool
+	t.Cleanup(func() { newSlotPool = saved })
+	var gotCap int
+	var gotNames []string
+	newSlotPool = func(capacity int, names []string) (*client.SlotPool, error) {
+		gotCap, gotNames = capacity, names
+		return nil, errors.New("pool refused")
+	}
+
+	res := runCommandOutput(t, map[string]string{
+		"MAX_UPSTREAM_REQUESTS": "7",
+		"TARGET_0_NAME":         "sonarr-hd",
+		"TARGET_0_APP":          "sonarr",
+		"TARGET_0_URL":          "http://sonarr:8989",
+		"TARGET_0_API_KEY":      smokeKey,
+		"TARGET_1_NAME":         "sab",
+		"TARGET_1_APP":          "sabnzbd",
+		"TARGET_1_URL":          "http://sab:8080",
+		"TARGET_1_API_KEY":      smokeKey,
+	}, "serve")
+	assert.Error(t, res.Err)
+	assert.Equal(t, res.Err.Error(), "pool refused")
+	assert.Equal(t, gotCap, 7)
+	assert.DeepEqual(t, gotNames, []string{"sonarr-hd", "sab"})
+	assert.NotContains(t, res.Logs, "Configured target")
 }

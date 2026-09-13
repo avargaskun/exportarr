@@ -43,6 +43,7 @@ func transportOptions(config *config.ArrConfig) client.TransportOptions {
 	return client.TransportOptions{
 		InsecureSkipVerify:   config.DisableSSLVerify,
 		ProxyFromEnvironment: config.ProxyFromEnv,
+		Limiter:              config.UpstreamLimiter,
 	}
 }
 

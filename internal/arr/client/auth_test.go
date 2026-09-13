@@ -1,16 +1,19 @@
 package client
 
 import (
+	"context"
 	"fmt"
 	"github.com/onedr0p/exportarr/internal/assert"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/onedr0p/exportarr/internal/arr/config"
 	base_client "github.com/onedr0p/exportarr/internal/client"
+	"github.com/onedr0p/exportarr/internal/fixtures"
 )
 
 var (
@@ -220,4 +223,87 @@ func TestNewAuth_FormAuthIgnoresEnvironmentProxy(t *testing.T) {
 	assert.NoError(t, err)
 	transport := auth.(*FormAuth).Transport.(*http.Transport)
 	assert.True(t, transport.Proxy == nil, "form auth must not send credentials through an environment proxy")
+}
+
+func TestTransportOptions_CopiesLimiter(t *testing.T) {
+	lim := fixtures.NewCountingLimiter(0)
+	opts := transportOptions(&config.ArrConfig{DisableSSLVerify: true, ProxyFromEnv: true, UpstreamLimiter: lim})
+	assert.DeepEqual(t, opts, base_client.TransportOptions{InsecureSkipVerify: true, ProxyFromEnvironment: true, Limiter: lim})
+
+	opts = transportOptions(&config.ArrConfig{})
+	assert.True(t, opts.Limiter == nil, "no limiter must stay nil (unlimited)")
+}
+
+var formAuthCreds = &fixtures.FormAuthCreds{Username: "admin", Password: "s3cret"}
+
+func newLimitedFormAuthClient(t *testing.T, fake *fixtures.FakeApp, lim base_client.Limiter) *Client {
+	t.Helper()
+	c, err := NewClient(&config.ArrConfig{
+		App: "radarr", APIVersion: "v3", URL: fake.URL, APIKey: fixtures.APIKey,
+		FormAuth: true, AuthUsername: formAuthCreds.Username, AuthPassword: formAuthCreds.Password,
+		RequestTimeout: 10 * time.Second, UpstreamLimiter: lim,
+	})
+	assert.NoError(t, err)
+	return c
+}
+
+func TestFormAuth_LoginPassesThroughLimiter(t *testing.T) {
+	fake := fixtures.NewFakeApp(t, fixtures.FakeAppOptions{App: "radarr", APIKey: fixtures.APIKey, FormAuth: formAuthCreds})
+	lim := fixtures.NewCountingLimiter(0)
+	c := newLimitedFormAuthClient(t, fake, lim)
+
+	_, err := Get[map[string]any](c, "system/status")
+	assert.NoError(t, err)
+	assert.Equal(t, fake.Logins(), 1)
+	assert.Equal(t, lim.Acquires(), int64(2), "login and API request must each take a slot")
+	assert.Equal(t, lim.Outstanding(), int64(0))
+
+	_, err = Get[map[string]any](c, "system/status")
+	assert.NoError(t, err)
+	assert.Equal(t, fake.Logins(), 1)
+	assert.Equal(t, lim.Acquires(), int64(3))
+	assert.Equal(t, lim.Outstanding(), int64(0))
+}
+
+func TestFormAuth_SingleSlotDoesNotDeadlock(t *testing.T) {
+	const workers = 8
+	fake := fixtures.NewFakeApp(t, fixtures.FakeAppOptions{
+		App: "radarr", APIKey: fixtures.APIKey, FormAuth: formAuthCreds,
+		Behavior: func(*http.Request) fixtures.Action { return fixtures.Delay(10 * time.Millisecond) },
+	})
+	lim := fixtures.NewCountingLimiter(1)
+	c := newLimitedFormAuthClient(t, fake, lim)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	start := make(chan struct{})
+	errs := make(chan error, workers)
+	var wg sync.WaitGroup
+	for range workers {
+		wg.Go(func() {
+			<-start
+			_, err := GetContext[map[string]any](ctx, c, "system/status")
+			errs <- err
+		})
+	}
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+	close(start)
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("requests through a one-slot limiter did not finish within 10s")
+	}
+	close(errs)
+	for err := range errs {
+		assert.NoError(t, err)
+	}
+	assert.Equal(t, fake.Logins(), 1)
+	assert.Equal(t, lim.Acquires(), int64(workers+1))
+	assert.Equal(t, lim.Peak(), int64(1))
+	assert.Equal(t, lim.Outstanding(), int64(0))
+	assert.Equal(t, fake.PeakInFlight(), int64(1))
 }

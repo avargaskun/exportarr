@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/onedr0p/exportarr/internal/fixtures"
 	"github.com/onedr0p/exportarr/internal/sabnzbd/config"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 )
@@ -196,4 +197,21 @@ func TestCollect_ErrorLinesCarryTarget(t *testing.T) {
 			assert.True(t, errorLines > 0, "no error lines in:\n%s", logs.String())
 		})
 	}
+}
+
+func TestCollect_PassesThroughLimiter(t *testing.T) {
+	fake := fixtures.NewFakeApp(t, fixtures.FakeAppOptions{App: "sabnzbd", APIKey: testAPIKey})
+	lim := fixtures.NewCountingLimiter(0)
+	collector, err := NewSabnzbdCollector(&config.SabnzbdConfig{
+		URL:             fake.URL,
+		APIKey:          testAPIKey,
+		CollectTimeout:  10 * time.Second,
+		UpstreamLimiter: lim,
+	})
+	assert.NoError(t, err)
+
+	assert.Equal(t, testutil.CollectAndCount(collector, "sabnzbd_collector_error"), 0)
+	assert.Equal(t, lim.Acquires(), int64(2), "queue and server_stats must each take a slot")
+	assert.Equal(t, lim.Outstanding(), int64(0))
+	assert.Len(t, fake.Requests(), 2)
 }

@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/onedr0p/exportarr/internal/client"
 	base_config "github.com/onedr0p/exportarr/internal/config"
 	"github.com/spf13/pflag"
 )
@@ -342,6 +343,8 @@ func TestValidate(t *testing.T) {
 
 func TestApplyBase(t *testing.T) {
 	copied := []string{"App", "URL", "APIKey", "DisableSSLVerify", "ProxyFromEnv", "RequestTimeout", "CollectTimeout"}
+	pool, err := client.NewSlotPool(2, []string{"radarr-4k"})
+	assert.NoError(t, err)
 	filled := ArrConfig{
 		App:                     "radarr",
 		APIVersion:              "v3",
@@ -366,8 +369,9 @@ func TestApplyBase(t *testing.T) {
 			BackfillSinceDate: "2021-01-01",
 			BackfillSinceTime: time.Date(2021, 1, 1, 0, 0, 0, 0, time.UTC),
 		},
-		Bazarr: BazarrConfig{SeriesBatchSize: 7, SeriesBatchConcurrency: 8},
-		Target: "radarr-4k",
+		Bazarr:          BazarrConfig{SeriesBatchSize: 7, SeriesBatchConcurrency: 8},
+		Target:          "radarr-4k",
+		UpstreamLimiter: pool.For("radarr-4k"),
 	}
 	empty := filled
 	empty.DisableSSLVerify = false

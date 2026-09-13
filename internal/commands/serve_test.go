@@ -14,11 +14,15 @@ import (
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/spf13/pflag"
 
+	arrclient "github.com/onedr0p/exportarr/internal/arr/client"
 	arrconfig "github.com/onedr0p/exportarr/internal/arr/config"
 	"github.com/onedr0p/exportarr/internal/assert"
+	"github.com/onedr0p/exportarr/internal/client"
 	"github.com/onedr0p/exportarr/internal/config"
 	"github.com/onedr0p/exportarr/internal/fixtures"
+	sabconfig "github.com/onedr0p/exportarr/internal/sabnzbd/config"
 	"github.com/onedr0p/exportarr/internal/targets"
 )
 
@@ -78,7 +82,7 @@ func TestBuildTargets_EveryApp(t *testing.T) {
 		cfg.Targets = append(cfg.Targets, targets.Target{Index: i, Name: s.name, App: s.app, URL: fake.URL, APIKey: fixtures.APIKey})
 	}
 
-	ts, err := buildTargets(cfg, serveProcess(), serveDefaults(), serveApps)
+	ts, err := buildTargets(cfg, serveProcess(), serveDefaults(), serveApps, testPool(t, cfg))
 	assert.NoError(t, err)
 	assert.Len(t, ts, len(specs))
 
@@ -126,7 +130,7 @@ func TestBuildTargets_ScrapeTimeouts(t *testing.T) {
 	wantScrape := []time.Duration{30 * time.Second, 2 * time.Minute, 6 * time.Second, 2 * time.Minute}
 	wantCollect := []time.Duration{25 * time.Second, 115 * time.Second, 3 * time.Second, 115 * time.Second}
 
-	ts, err := buildTargets(cfg, process, serveDefaults(), serveApps)
+	ts, err := buildTargets(cfg, process, serveDefaults(), serveApps, testPool(t, cfg))
 	assert.NoError(t, err)
 	assert.Len(t, ts, 4)
 	for i, tg := range ts {
@@ -147,17 +151,29 @@ func TestBuildTargets_ScrapeTimeouts(t *testing.T) {
 	assert.Equal(t, newServer(maxScrapeTimeout(ts)).WriteTimeout, 2*time.Minute+10*time.Second)
 
 	cfg.Targets[0].ScrapeTimeout = new(3 * time.Minute)
-	ts, err = buildTargets(cfg, process, serveDefaults(), serveApps)
+	ts, err = buildTargets(cfg, process, serveDefaults(), serveApps, testPool(t, cfg))
 	assert.NoError(t, err)
 	assert.Equal(t, maxScrapeTimeout(ts), 3*time.Minute)
 	assert.Equal(t, newServer(maxScrapeTimeout(ts)).WriteTimeout, 3*time.Minute+10*time.Second)
 	assert.Equal(t, maxScrapeTimeout(nil), time.Duration(0))
 }
 
+// testPool is a slot pool for cfg's targets with the default capacity.
+func testPool(t *testing.T, cfg *targets.Config) *client.SlotPool {
+	t.Helper()
+	names := make([]string, len(cfg.Targets))
+	for i, tg := range cfg.Targets {
+		names[i] = tg.Name
+	}
+	pool, err := client.NewSlotPool(max(64, len(names)+1), names)
+	assert.NoError(t, err)
+	return pool
+}
+
 // stubApps builds every target of app "stub" from the given collectors.
 func stubApps(cs ...prometheus.Collector) map[string]appBuilder {
 	return map[string]appBuilder{
-		"stub": func(t *targets.Target, _ config.Config, _ arrconfig.ArrConfig) (string, []prometheus.Collector, error) {
+		"stub": func(t *targets.Target, _ config.Config, _ arrconfig.ArrConfig, _ client.Limiter) (string, []prometheus.Collector, error) {
 			return t.URL, cs, nil
 		},
 	}
@@ -170,7 +186,7 @@ func TestBuildTargets_HandlerAppliesTargetScrapeTimeout(t *testing.T) {
 		{Index: 0, Name: "slow", App: "stub", URL: "http://slow:1", ScrapeTimeout: new(100 * time.Millisecond)},
 	}}
 
-	ts, err := buildTargets(cfg, serveProcess(), serveDefaults(), stubApps(blocking))
+	ts, err := buildTargets(cfg, serveProcess(), serveDefaults(), stubApps(blocking), testPool(t, cfg))
 	assert.NoError(t, err)
 	code, body := scrapeHandler(t, ts[0].handler)
 	assert.Equal(t, code, http.StatusServiceUnavailable)
@@ -189,7 +205,7 @@ func TestBuildTargets_JoinsLabeledErrors(t *testing.T) {
 		{Index: 5, Name: "fine", App: "sonarr", URL: "http://fine:8989", APIKey: fixtures.APIKey},
 	}}
 
-	ts, err := buildTargets(cfg, serveProcess(), serveDefaults(), serveApps)
+	ts, err := buildTargets(cfg, serveProcess(), serveDefaults(), serveApps, testPool(t, cfg))
 	assert.Nil(t, ts)
 	assert.Error(t, err)
 	want := strings.Join([]string{
@@ -213,7 +229,7 @@ func TestBuildTargets_RegistrationError(t *testing.T) {
 		{Index: 0, Name: "dup", App: "stub", URL: "http://dup:1"},
 	}}
 
-	ts, err := buildTargets(cfg, serveProcess(), serveDefaults(), stubApps(constCollector{desc}, constCollector{desc}))
+	ts, err := buildTargets(cfg, serveProcess(), serveDefaults(), stubApps(constCollector{desc}, constCollector{desc}), testPool(t, cfg))
 	assert.Nil(t, ts)
 	assert.Error(t, err)
 	assert.True(t, strings.HasPrefix(err.Error(), "target 0/dup: "), "unlabeled: %q", err.Error())
@@ -227,7 +243,7 @@ func TestBuildTargets_OneBadTargetBuildsNothing(t *testing.T) {
 		{Index: 1, Name: "unknown", App: "nope", URL: "http://unknown:1"},
 	}}
 
-	ts, err := buildTargets(cfg, serveProcess(), serveDefaults(), stubApps(constCollector{prometheus.NewDesc("fine", "test", nil, nil)}))
+	ts, err := buildTargets(cfg, serveProcess(), serveDefaults(), stubApps(constCollector{prometheus.NewDesc("fine", "test", nil, nil)}), testPool(t, cfg))
 	assert.Nil(t, ts)
 	assert.Error(t, err)
 	assert.Equal(t, err.Error(), "target 1/unknown: unsupported app")
@@ -241,7 +257,7 @@ func TestBuildTargets_RejectsNonPositiveScrapeTimeout(t *testing.T) {
 		{Index: 1, Name: "overrides", App: "stub", URL: "http://b:1", ScrapeTimeout: new(time.Second)},
 	}}
 
-	ts, err := buildTargets(cfg, process, serveDefaults(), stubApps())
+	ts, err := buildTargets(cfg, process, serveDefaults(), stubApps(), testPool(t, cfg))
 	assert.Nil(t, ts)
 	assert.Error(t, err)
 	assert.Equal(t, err.Error(), "target 0/inherits: SCRAPE_TIMEOUT must be greater than zero")
@@ -261,7 +277,7 @@ func TestSafeCollector_RecoversPanic(t *testing.T) {
 	ts, err := buildTargets(cfg, serveProcess(), serveDefaults(), stubApps(
 		panicCollector{prometheus.NewDesc("panicky", "test", nil, nil)},
 		constCollector{prometheus.NewDesc("fine", "test", nil, nil)},
-	))
+	), testPool(t, cfg))
 	assert.NoError(t, err)
 
 	code, body := scrapeHandler(t, ts[0].handler)
@@ -320,9 +336,9 @@ func serveHandlerClient(t *testing.T, h http.Handler) *runningCommand {
 	t.Helper()
 	srv := httptest.NewServer(h)
 	t.Cleanup(srv.Close)
-	client := newHarnessClient()
-	t.Cleanup(client.CloseIdleConnections)
-	return &runningCommand{t: t, url: srv.URL, client: client}
+	hc := newHarnessClient()
+	t.Cleanup(hc.CloseIdleConnections)
+	return &runningCommand{t: t, url: srv.URL, client: hc}
 }
 
 func routingClient(t *testing.T) *runningCommand {
@@ -431,7 +447,7 @@ func TestServeHandler_SelfMetricsSeparateFromTargets(t *testing.T) {
 	cfg := &targets.Config{Targets: []targets.Target{
 		{Index: 0, Name: "one", App: "stub", URL: "http://one:1"},
 	}}
-	ts, err := buildTargets(cfg, serveProcess(), serveDefaults(), stubApps(constCollector{prometheus.NewDesc("target_series", "test", nil, nil)}))
+	ts, err := buildTargets(cfg, serveProcess(), serveDefaults(), stubApps(constCollector{prometheus.NewDesc("target_series", "test", nil, nil)}), testPool(t, cfg))
 	assert.NoError(t, err)
 	rc := serveHandlerClient(t, newServeHandler(ts, newSelfRegistry()))
 
@@ -473,4 +489,159 @@ func TestRedactTargetURL(t *testing.T) {
 	assert.Equal(t, redactTargetURL("http://sonarr:8989/base"), "http://sonarr:8989/base")
 	assert.Equal(t, redactTargetURL("http://user:pw@sonarr:8989/base?apikey=x#frag"), "http://sonarr:8989/base") //nolint:gosec // redaction fixture
 	assert.Equal(t, redactTargetURL("http://[::1"), "")
+}
+
+func TestBuildTargets_PassesEachTargetItsLimiter(t *testing.T) {
+	cfg := &targets.Config{Targets: []targets.Target{
+		{Index: 0, Name: "one", App: "stub", URL: "http://one:1"},
+		{Index: 1, Name: "two", App: "stub", URL: "http://two:1"},
+	}}
+	pool := testPool(t, cfg)
+	got := map[string]client.Limiter{}
+	apps := map[string]appBuilder{
+		"stub": func(t *targets.Target, _ config.Config, _ arrconfig.ArrConfig, lim client.Limiter) (string, []prometheus.Collector, error) {
+			got[t.Name] = lim
+			return t.URL, nil, nil
+		},
+	}
+
+	_, err := buildTargets(cfg, serveProcess(), serveDefaults(), apps, pool)
+	assert.NoError(t, err)
+	assert.Len(t, slices.Collect(maps.Keys(got)), 2)
+	for name, lim := range got {
+		assert.True(t, lim == pool.For(name), "target %s did not get its own limiter", name)
+	}
+}
+
+type slotStats struct {
+	waits    uint64
+	inFlight float64
+}
+
+// poolStats reads each target's acquire count and in-flight gauge from the pool's metrics.
+func poolStats(t *testing.T, pool *client.SlotPool) map[string]slotStats {
+	t.Helper()
+	reg := prometheus.NewRegistry()
+	reg.MustRegister(pool)
+	mfs, err := reg.Gather()
+	assert.NoError(t, err)
+	out := map[string]slotStats{}
+	for _, mf := range mfs {
+		for _, m := range mf.GetMetric() {
+			var name string
+			for _, l := range m.GetLabel() {
+				if l.GetName() == "target" {
+					name = l.GetValue()
+				}
+			}
+			st := out[name]
+			switch mf.GetName() {
+			case "exportarr_upstream_slot_wait_seconds":
+				st.waits = m.GetHistogram().GetSampleCount()
+			case "exportarr_upstream_requests_in_flight":
+				st.inFlight = m.GetGauge().GetValue()
+			}
+			out[name] = st
+		}
+	}
+	return out
+}
+
+func TestBuildTargets_PoolSeesEveryUpstreamRequest(t *testing.T) {
+	creds := &fixtures.FormAuthCreds{Username: "admin", Password: "s3cret"}
+	fakes := map[string]*fixtures.FakeApp{
+		"sonarr-hd":  fixtures.NewFakeApp(t, fixtures.FakeAppOptions{App: "sonarr", APIKey: fixtures.APIKey}),
+		"radarr-sso": fixtures.NewFakeApp(t, fixtures.FakeAppOptions{App: "radarr", APIKey: fixtures.APIKey, FormAuth: creds}),
+		"sab":        fixtures.NewFakeApp(t, fixtures.FakeAppOptions{App: "sabnzbd", APIKey: fixtures.APIKey}),
+	}
+	cfg := &targets.Config{MaxUpstreamRequests: 64, Targets: []targets.Target{
+		{Index: 0, Name: "sonarr-hd", App: "sonarr", URL: fakes["sonarr-hd"].URL, APIKey: fixtures.APIKey},
+		{Index: 1, Name: "radarr-sso", App: "radarr", URL: fakes["radarr-sso"].URL, APIKey: fixtures.APIKey,
+			FormAuth: true, AuthUsername: creds.Username, AuthPassword: creds.Password},
+		{Index: 2, Name: "sab", App: "sabnzbd", URL: fakes["sab"].URL, APIKey: fixtures.APIKey},
+	}}
+	pool := testPool(t, cfg)
+
+	ts, err := buildTargets(cfg, serveProcess(), serveDefaults(), serveApps, pool)
+	assert.NoError(t, err)
+	for _, tg := range ts {
+		code, body := scrapeHandler(t, tg.handler)
+		assert.Equal(t, code, http.StatusOK, tg.name)
+		assert.NotContains(t, body, "_collector_error{", tg.name)
+		assert.NotContains(t, body, "exportarr_upstream_", tg.name)
+	}
+
+	assert.Equal(t, fakes["radarr-sso"].Logins(), 1)
+	stats := poolStats(t, pool)
+	for name, fake := range fakes {
+		requests := len(fake.Requests())
+		assert.True(t, requests > 1, "%s saw %d requests", name, requests)
+		assert.Equal(t, stats[name].waits, uint64(requests), "%s: every upstream request must take a slot", name)
+		assert.Equal(t, stats[name].inFlight, float64(0), "%s leaked a slot", name)
+	}
+}
+
+func TestNewServeSelfRegistry_ExposesUpstreamMetrics(t *testing.T) {
+	useAppInfo(t)
+	cfg := &targets.Config{Targets: []targets.Target{
+		{Index: 0, Name: "one", App: "stub", URL: "http://one:1"},
+		{Index: 1, Name: "two", App: "stub", URL: "http://two:1"},
+	}}
+	pool, err := client.NewSlotPool(10, []string{"one", "two"})
+	assert.NoError(t, err)
+	ts, err := buildTargets(cfg, serveProcess(), serveDefaults(), stubApps(constCollector{prometheus.NewDesc("target_series", "test", nil, nil)}), pool)
+	assert.NoError(t, err)
+	rc := serveHandlerClient(t, newServeHandler(ts, newServeSelfRegistry(pool)))
+
+	code, body := rc.Get("/metrics")
+	assert.Equal(t, code, http.StatusOK)
+	for _, want := range []string{
+		"exportarr_app_info{",
+		"go_goroutines",
+		"exportarr_upstream_requests_max 10\n",
+		`exportarr_upstream_requests_in_flight{target="one"} 0` + "\n",
+		`exportarr_upstream_requests_in_flight{target="two"} 0` + "\n",
+		`exportarr_upstream_slot_wait_seconds_count{target="one"} 0` + "\n",
+		`exportarr_upstream_slot_wait_seconds_bucket{target="two",le="30"} 0` + "\n",
+		`exportarr_upstream_slot_wait_timeouts_total{target="two"} 0` + "\n",
+	} {
+		assert.Contains(t, body, want)
+	}
+	assert.NotContains(t, body, "target_series")
+
+	for _, name := range []string{"one", "two"} {
+		code, body = rc.Get("/metrics/" + name)
+		assert.Equal(t, code, http.StatusOK)
+		assert.Contains(t, body, "target_series 42")
+		assert.NotContains(t, body, "exportarr_upstream_")
+	}
+}
+
+func TestSingleTarget_LeavesUpstreamUnlimited(t *testing.T) {
+	t.Setenv("FORM_AUTH", "true")
+	t.Setenv("AUTH_USERNAME", "admin")
+	t.Setenv("AUTH_PASSWORD", "s3cret")
+	base := serveProcess()
+	base.App = "radarr"
+	base.URL = "http://radarr:7878"
+	base.APIKey = fixtures.APIKey
+	flags := pflag.NewFlagSet("radarr", pflag.ContinueOnError)
+	arrconfig.RegisterArrFlags(flags)
+
+	c, err := arrconfig.LoadArrConfig(base, flags)
+	assert.NoError(t, err)
+	_, err = radarrApp.build(c)
+	assert.NoError(t, err)
+	assert.True(t, c.UpstreamLimiter == nil, "single-target mode must not set a limiter")
+	auth, err := arrclient.NewAuth(c)
+	assert.NoError(t, err)
+	rt := auth.(*arrclient.FormAuth).Transport
+	_, ok := rt.(*http.Transport)
+	assert.True(t, ok, "single-target transport must stay *http.Transport, got %T", rt)
+
+	sc, err := sabconfig.LoadSabnzbdConfig(base)
+	assert.NoError(t, err)
+	_, err = buildSabnzbd(sc)
+	assert.NoError(t, err)
+	assert.True(t, sc.UpstreamLimiter == nil, "single-target sabnzbd must not set a limiter")
 }

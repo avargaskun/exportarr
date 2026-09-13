@@ -13,6 +13,7 @@ import (
 
 	arrconfig "github.com/onedr0p/exportarr/internal/arr/config"
 	"github.com/onedr0p/exportarr/internal/assert"
+	"github.com/onedr0p/exportarr/internal/client"
 	"github.com/onedr0p/exportarr/internal/config"
 	sabconfig "github.com/onedr0p/exportarr/internal/sabnzbd/config"
 )
@@ -225,6 +226,8 @@ func TestArrConfig_Inheritance(t *testing.T) {
 	process.DisableSSLVerify = true
 	process.ProxyFromEnv = true
 	process.RequestTimeout = 45 * time.Second
+	pool, err := client.NewSlotPool(2, []string{"sonarr-hd"})
+	assert.NoError(t, err)
 
 	defaults := arrconfig.ArrConfig{
 		App:                     "serve",
@@ -247,7 +250,8 @@ func TestArrConfig_Inheritance(t *testing.T) {
 			BackfillSinceDate: "2024-01-02",
 			BackfillSinceTime: time.Date(2024, 1, 2, 0, 0, 0, 0, time.UTC),
 		},
-		Bazarr: arrconfig.BazarrConfig{SeriesBatchSize: 50, SeriesBatchConcurrency: 3},
+		Bazarr:          arrconfig.BazarrConfig{SeriesBatchSize: 50, SeriesBatchConcurrency: 3},
+		UpstreamLimiter: pool.For("sonarr-hd"),
 	}
 	controlledByTarget := map[string]bool{
 		"FormAuth": true, "AuthUsername": true, "AuthPassword": true, "Target": true,

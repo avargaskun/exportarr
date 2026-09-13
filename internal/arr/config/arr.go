@@ -11,6 +11,7 @@ import (
 	"github.com/caarlos0/env/v11"
 	flag "github.com/spf13/pflag"
 
+	"github.com/onedr0p/exportarr/internal/client"
 	base_config "github.com/onedr0p/exportarr/internal/config"
 )
 
@@ -63,6 +64,7 @@ type ArrConfig struct {
 	Prowlarr                ProwlarrConfig `envPrefix:"PROWLARR__"`
 	Bazarr                  BazarrConfig   `envPrefix:"BAZARR__"`
 	Target                  string         `env:"-"` // empty in single-target mode
+	UpstreamLimiter         client.Limiter `env:"-"` // nil (unlimited) in single-target mode
 }
 
 // UseFormAuth reports whether form-based authentication is enabled.

@@ -49,14 +49,31 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 
-	ts, err := buildTargets(cfg, *conf, *arrDefaults, serveApps)
+	names := make([]string, len(cfg.Targets))
+	for i, t := range cfg.Targets {
+		names[i] = t.Name
+	}
+	pool, err := newSlotPool(cfg.MaxUpstreamRequests, names)
+	if err != nil {
+		return err
+	}
+	ts, err := buildTargets(cfg, *conf, *arrDefaults, serveApps, pool)
 	if err != nil {
 		return err
 	}
 	for _, t := range ts {
 		slog.Info("Configured target", "target", t.name, "app", t.app, "url", redactTargetURL(t.url))
 	}
-	return serveHTTP(cmd.Context(), maxScrapeTimeout(ts), newServeHandler(ts, newSelfRegistry()))
+	return serveHTTP(cmd.Context(), maxScrapeTimeout(ts), newServeHandler(ts, newServeSelfRegistry(pool)))
+}
+
+var newSlotPool = client.NewSlotPool
+
+// newServeSelfRegistry is the exporter's own registry plus the upstream cap metrics.
+func newServeSelfRegistry(pool *client.SlotPool) *prometheus.Registry {
+	self := newSelfRegistry()
+	self.MustRegister(pool)
+	return self
 }
 
 func redactTargetURL(raw string) string {
@@ -86,8 +103,8 @@ func newServeHandler(ts []*target, self *prometheus.Registry) http.Handler {
 	return handlers.LogHandler(handlers.RecoveryHandler(mux))
 }
 
-// appBuilder resolves a target into its app's collectors and the URL they scrape.
-type appBuilder func(t *targets.Target, process config.Config, arrDefaults arrconfig.ArrConfig) (url string, cs []prometheus.Collector, err error)
+// appBuilder resolves a target into its app's collectors, limited by lim, and the URL they scrape.
+type appBuilder func(t *targets.Target, process config.Config, arrDefaults arrconfig.ArrConfig, lim client.Limiter) (url string, cs []prometheus.Collector, err error)
 
 // serveApps maps every targets.AppNames entry to its builder.
 var serveApps = map[string]appBuilder{
@@ -100,11 +117,12 @@ var serveApps = map[string]appBuilder{
 }
 
 func arrBuilder(app arrCommand) appBuilder {
-	return func(t *targets.Target, process config.Config, arrDefaults arrconfig.ArrConfig) (string, []prometheus.Collector, error) {
+	return func(t *targets.Target, process config.Config, arrDefaults arrconfig.ArrConfig, lim client.Limiter) (string, []prometheus.Collector, error) {
 		c, err := t.ArrConfig(arrDefaults, process)
 		if err != nil {
 			return "", nil, err
 		}
+		c.UpstreamLimiter = lim
 		cs, err := app.build(c)
 		if err != nil {
 			return "", nil, labelErr(t.Label(), err)
@@ -113,11 +131,12 @@ func arrBuilder(app arrCommand) appBuilder {
 	}
 }
 
-func sabnzbdBuilder(t *targets.Target, process config.Config, _ arrconfig.ArrConfig) (string, []prometheus.Collector, error) {
+func sabnzbdBuilder(t *targets.Target, process config.Config, _ arrconfig.ArrConfig, lim client.Limiter) (string, []prometheus.Collector, error) {
 	c, err := t.SabnzbdConfig(process)
 	if err != nil {
 		return "", nil, err
 	}
+	c.UpstreamLimiter = lim
 	cs, err := buildSabnzbd(c)
 	if err != nil {
 		return "", nil, labelErr(t.Label(), err)
@@ -153,13 +172,13 @@ type target struct {
 }
 
 // buildTargets builds every target, joining all errors; it returns no targets if any failed.
-func buildTargets(cfg *targets.Config, process config.Config, arrDefaults arrconfig.ArrConfig, apps map[string]appBuilder) ([]*target, error) {
+func buildTargets(cfg *targets.Config, process config.Config, arrDefaults arrconfig.ArrConfig, apps map[string]appBuilder, pool *client.SlotPool) ([]*target, error) {
 	var (
 		out  []*target
 		errs []error
 	)
 	for i := range cfg.Targets {
-		t, err := buildTarget(&cfg.Targets[i], process, arrDefaults, apps)
+		t, err := buildTarget(&cfg.Targets[i], process, arrDefaults, apps, pool)
 		if err != nil {
 			errs = append(errs, err)
 			continue
@@ -172,7 +191,7 @@ func buildTargets(cfg *targets.Config, process config.Config, arrDefaults arrcon
 	return out, nil
 }
 
-func buildTarget(t *targets.Target, process config.Config, arrDefaults arrconfig.ArrConfig, apps map[string]appBuilder) (*target, error) {
+func buildTarget(t *targets.Target, process config.Config, arrDefaults arrconfig.ArrConfig, apps map[string]appBuilder, pool *client.SlotPool) (*target, error) {
 	build, ok := apps[t.App]
 	if !ok {
 		return nil, fmt.Errorf("%s: unsupported app", t.Label())
@@ -184,7 +203,7 @@ func buildTarget(t *targets.Target, process config.Config, arrDefaults arrconfig
 	if scrapeTimeout <= 0 {
 		return nil, fmt.Errorf("%s: SCRAPE_TIMEOUT must be greater than zero", t.Label())
 	}
-	url, cs, err := build(t, process, arrDefaults)
+	url, cs, err := build(t, process, arrDefaults, pool.For(t.Name))
 	if err != nil {
 		return nil, err
 	}

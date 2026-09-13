@@ -212,6 +212,7 @@ func NewSabnzbdCollector(config *config.SabnzbdConfig) (*SabnzbdCollector, error
 	opts := client.TransportOptions{
 		InsecureSkipVerify:   config.DisableSSLVerify,
 		ProxyFromEnvironment: config.ProxyFromEnv,
+		Limiter:              config.UpstreamLimiter,
 	}
 	client, err := client.NewClient(config.URL, opts, config.RequestTimeout, author)
 	if err != nil {
