@@ -47,9 +47,11 @@ jobs:
           go mod tidy
           git diff --exit-code go.mod go.sum
 
-      - name: Run unit tests
-        run: go test -race ./...
+      - name: Run unit tests with coverage
+        run: go test -race -covermode=atomic -coverpkg=./... -coverprofile=coverage.out ./...
 
+      - name: Check coverage floors
+        run: go run ./internal/tools/covercheck -profile coverage.out -floors .github/coverage-floors.txt
 
   image:
     name: Container image
