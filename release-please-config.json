@@ -15,11 +15,11 @@
       "include-v-in-release-name": true,
       "always-update": true,
       "extra-files": [
-        "README.md",
-        "examples/compose/docker-compose.yaml",
-        "examples/kubernetes/lidarr-exporter.yaml",
-        "examples/kubernetes/radarr-exporter.yaml",
-        "examples/kubernetes/sonarr-exporter.yaml"
+        { "type": "generic", "path": "README.md" },
+        { "type": "generic", "path": "examples/compose/docker-compose.yaml" },
+        { "type": "generic", "path": "examples/kubernetes/lidarr-exporter.yaml" },
+        { "type": "generic", "path": "examples/kubernetes/radarr-exporter.yaml" },
+        { "type": "generic", "path": "examples/kubernetes/sonarr-exporter.yaml" }
       ]
     }
   },
