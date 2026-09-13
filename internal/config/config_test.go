@@ -3,6 +3,7 @@ package config
 import (
 	"github.com/onedr0p/exportarr/internal/assert"
 	"testing"
+	"time"
 
 	"github.com/spf13/pflag"
 )
@@ -20,6 +21,32 @@ func TestLoadConfig_Defaults(t *testing.T) {
 	assert.Equal(t, config.LogFormat, "console")
 	assert.Equal(t, config.Port, 9707)
 	assert.Equal(t, config.Interface, "0.0.0.0")
+	assert.Equal(t, config.ScrapeTimeout, 2*time.Minute)
+}
+
+func TestLoadConfig_ScrapeTimeout(t *testing.T) {
+	t.Setenv("SCRAPE_TIMEOUT", "90s")
+	config, err := LoadConfig(&pflag.FlagSet{})
+	assert.NoError(t, err)
+	assert.Equal(t, config.ScrapeTimeout, 90*time.Second)
+
+	flags := testFlagSet()
+	_ = flags.Set("scrape-timeout", "5m")
+	config, err = LoadConfig(flags)
+	assert.NoError(t, err)
+	assert.Equal(t, config.ScrapeTimeout, 5*time.Minute)
+}
+
+func TestCollectTimeout(t *testing.T) {
+	for _, tc := range []struct {
+		scrape, collect time.Duration
+	}{
+		{2 * time.Minute, 115 * time.Second},
+		{6 * time.Second, 3 * time.Second},
+	} {
+		c := Config{ScrapeTimeout: tc.scrape}
+		assert.Equal(t, c.CollectTimeout(), tc.collect)
+	}
 }
 
 func TestLoadConfig_Flags(t *testing.T) {
@@ -134,6 +161,18 @@ func TestValidate(t *testing.T) {
 		{
 			name: "good",
 			config: &Config{
+				LogLevel:      "debug",
+				LogFormat:     "console",
+				URL:           "http://localhost",
+				APIKey:        "abcdef0123456789abcdef0123456789",
+				Port:          1234,
+				Interface:     "0.0.0.0",
+				ScrapeTimeout: time.Minute,
+			},
+		},
+		{
+			name: "zero-scrape-timeout",
+			config: &Config{
 				LogLevel:  "debug",
 				LogFormat: "console",
 				URL:       "http://localhost",
@@ -141,6 +180,7 @@ func TestValidate(t *testing.T) {
 				Port:      1234,
 				Interface: "0.0.0.0",
 			},
+			shouldError: true,
 		},
 		{
 			name: "missing-port",

@@ -3,6 +3,7 @@ package config
 import (
 	"github.com/onedr0p/exportarr/internal/assert"
 	"testing"
+	"time"
 
 	base_config "github.com/onedr0p/exportarr/internal/config"
 	"github.com/spf13/pflag"
@@ -44,11 +45,31 @@ func TestLoadConfig_Defaults(t *testing.T) {
 	assert.NoError(t, err)
 
 	assert.Equal(t, config.APIVersion, "v3")
+	assert.Equal(t, config.SeriesConcurrency, DefaultSeriesConcurrency)
 
 	// base config values are not overwritten
 	assert.Equal(t, config.URL, "http://localhost")
 	assert.Equal(t, config.APIKey, "abcdef0123456789abcdef0123456789")
 	assert.True(t, config.DisableSSLVerify)
+}
+
+func TestLoadConfig_SeriesConcurrency(t *testing.T) {
+	t.Setenv("SERIES_CONCURRENCY", "4")
+	config, err := LoadArrConfig(base_config.Config{}, testFlagSet())
+	assert.NoError(t, err)
+	assert.Equal(t, config.SeriesConcurrency, 4)
+
+	flags := testFlagSet()
+	_ = flags.Set("series-concurrency", "2")
+	config, err = LoadArrConfig(base_config.Config{}, flags)
+	assert.NoError(t, err)
+	assert.Equal(t, config.SeriesConcurrency, 2)
+}
+
+func TestLoadConfig_CollectTimeoutFromBase(t *testing.T) {
+	config, err := LoadArrConfig(base_config.Config{ScrapeTimeout: time.Minute}, testFlagSet())
+	assert.NoError(t, err)
+	assert.Equal(t, config.CollectTimeout, 55*time.Second)
 }
 
 func TestLoadConfig_Environment(t *testing.T) {
@@ -153,30 +174,33 @@ func TestValidate(t *testing.T) {
 		{
 			name: "good-form-auth",
 			config: &ArrConfig{
-				URL:          "http://localhost",
-				APIKey:       "abcdef0123456789abcdef0123456789",
-				APIVersion:   "v3",
-				AuthUsername: "user",
-				AuthPassword: "pass",
-				FormAuth:     true,
+				URL:               "http://localhost",
+				APIKey:            "abcdef0123456789abcdef0123456789",
+				APIVersion:        "v3",
+				AuthUsername:      "user",
+				AuthPassword:      "pass",
+				FormAuth:          true,
+				SeriesConcurrency: 10,
 			},
 			valid: true,
 		},
 		{
 			name: "good-api-key-32-len",
 			config: &ArrConfig{
-				URL:        "http://localhost",
-				APIKey:     "abcdefABCDEF0123456789abcdef0123",
-				APIVersion: "v3",
+				URL:               "http://localhost",
+				APIKey:            "abcdefABCDEF0123456789abcdef0123",
+				APIVersion:        "v3",
+				SeriesConcurrency: 10,
 			},
 			valid: true,
 		},
 		{
 			name: "good-api-key-32-len",
 			config: &ArrConfig{
-				URL:        "http://localhost",
-				APIKey:     "abcdefABCDEF01234567",
-				APIVersion: "v3",
+				URL:               "http://localhost",
+				APIKey:            "abcdefABCDEF01234567",
+				APIVersion:        "v3",
+				SeriesConcurrency: 10,
 			},
 			valid: true,
 		},
@@ -192,9 +216,10 @@ func TestValidate(t *testing.T) {
 		{
 			name: "no-api-version",
 			config: &ArrConfig{
-				URL:        "http://localhost",
-				APIKey:     "abcdef0123456789abcdef0123456789",
-				APIVersion: "",
+				URL:               "http://localhost",
+				APIKey:            "abcdef0123456789abcdef0123456789",
+				APIVersion:        "",
+				SeriesConcurrency: 10,
 			},
 			valid: true,
 		},
@@ -217,6 +242,33 @@ func TestValidate(t *testing.T) {
 				AuthUsername: "username",
 			},
 			valid: false,
+		},
+		{
+			name: "series-concurrency-too-low",
+			config: &ArrConfig{
+				URL:               "http://localhost",
+				APIKey:            "abcdef0123456789abcdef0123456789",
+				SeriesConcurrency: 0,
+			},
+			valid: false,
+		},
+		{
+			name: "series-concurrency-too-high",
+			config: &ArrConfig{
+				URL:               "http://localhost",
+				APIKey:            "abcdef0123456789abcdef0123456789",
+				SeriesConcurrency: MaxSeriesConcurrency + 1,
+			},
+			valid: false,
+		},
+		{
+			name: "series-concurrency-max",
+			config: &ArrConfig{
+				URL:               "http://localhost",
+				APIKey:            "abcdef0123456789abcdef0123456789",
+				SeriesConcurrency: MaxSeriesConcurrency,
+			},
+			valid: true,
 		},
 		{
 			name: "form-auth-needs-user-and-password",

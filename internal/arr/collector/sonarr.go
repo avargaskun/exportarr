@@ -100,6 +100,8 @@ func (collector *sonarrCollector) Collect(ch chan<- prometheus.Metric) {
 	}
 	defer collector.collectMu.Unlock()
 	c := collector.client
+	ctx, cancel := collectContext(collector.config)
+	defer cancel()
 	var seriesFileSize int64
 	var (
 		seriesDownloaded    = 0
@@ -117,7 +119,7 @@ func (collector *sonarrCollector) Collect(ch chan<- prometheus.Metric) {
 		qualityWeights      = map[string]string{}
 	)
 
-	series, err := client.Get[model.Series](c, "series")
+	series, err := client.GetContext[model.Series](ctx, c, "series")
 	if err != nil {
 		emitError(log, ch, collector.errorMetric, "Error getting series", "error", err)
 		return
@@ -128,7 +130,7 @@ func (collector *sonarrCollector) Collect(ch chan<- prometheus.Metric) {
 
 	// Quality definitions are repository-global: fetch once, not per series.
 	if collectQuality {
-		qualities, err := client.Get[model.Qualities](c, "qualitydefinition")
+		qualities, err := client.GetContext[model.Qualities](ctx, c, "qualitydefinition")
 		if err != nil {
 			emitError(log, ch, collector.errorMetric, "Error getting qualities", "error", err)
 			return
@@ -173,15 +175,20 @@ func (collector *sonarrCollector) Collect(ch chan<- prometheus.Metric) {
 	// fan them out with bounded concurrency instead of ~2×N serial requests.
 	if collectQuality || collectEpisodes {
 		var mu sync.Mutex
-		eg := errgroup.Group{}
-		eg.SetLimit(maxConcurrentSeriesFetches)
+		// The group's context cancels the remaining lookups on the first
+		// error or when the collect timeout expires.
+		eg, egCtx := errgroup.WithContext(ctx)
+		eg.SetLimit(seriesConcurrency(collector.config))
 		for _, s := range series {
-			goRecoverable(&eg, func() error {
+			if egCtx.Err() != nil {
+				break
+			}
+			goRecoverable(eg, func() error {
 				params := client.QueryParams{}
 				params.Add("seriesId", strconv.Itoa(s.ID))
 
 				if collectQuality {
-					episodeFile, err := client.Get[model.EpisodeFile](c, "episodefile", params)
+					episodeFile, err := client.GetContext[model.EpisodeFile](egCtx, c, "episodefile", params)
 					if err != nil {
 						return fmt.Errorf("getting episodefile for series %d: %w", s.ID, err)
 					}
@@ -194,7 +201,7 @@ func (collector *sonarrCollector) Collect(ch chan<- prometheus.Metric) {
 					mu.Unlock()
 				}
 				if collectEpisodes {
-					episode, err := client.Get[model.Episode](c, "episode", params)
+					episode, err := client.GetContext[model.Episode](egCtx, c, "episode", params)
 					if err != nil {
 						return fmt.Errorf("getting episode for series %d: %w", s.ID, err)
 					}
@@ -226,7 +233,7 @@ func (collector *sonarrCollector) Collect(ch chan<- prometheus.Metric) {
 		params := client.QueryParams{}
 		params.Add("pageSize", "1")
 
-		missing, err := client.Get[model.Missing](c, "wanted/missing", params)
+		missing, err := client.GetContext[model.Missing](ctx, c, "wanted/missing", params)
 		if err != nil {
 			emitError(log, ch, collector.errorMetric, "Error getting missing", "error", err)
 			return
@@ -234,7 +241,7 @@ func (collector *sonarrCollector) Collect(ch chan<- prometheus.Metric) {
 		episodesMissing = missing.TotalRecords
 
 		// Cutoff unmet endpoint uses the same params as missing
-		cutoffUnmet, err := client.Get[model.CutoffUnmet](c, "wanted/cutoff", params)
+		cutoffUnmet, err := client.GetContext[model.CutoffUnmet](ctx, c, "wanted/cutoff", params)
 		if err != nil {
 			emitError(log, ch, collector.errorMetric, "Error getting cutoff unmet", "error", err)
 			return
@@ -243,7 +250,7 @@ func (collector *sonarrCollector) Collect(ch chan<- prometheus.Metric) {
 	}
 
 	// Get tag details for series
-	tagObjects, err := client.Get[model.TagSeries](c, "tag/detail")
+	tagObjects, err := client.GetContext[model.TagSeries](ctx, c, "tag/detail")
 	if err != nil {
 		emitError(log, ch, collector.errorMetric, "Error getting tags", "error", err)
 		return

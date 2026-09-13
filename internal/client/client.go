@@ -83,6 +83,11 @@ func (c *Client) unmarshalBody(b io.Reader, target any) (err error) {
 
 // DoRequest - Take a HTTP Request and return Unmarshaled data
 func (c *Client) DoRequest(endpoint string, target any, queryParams ...QueryParams) error {
+	return c.DoRequestContext(context.Background(), endpoint, target, queryParams...)
+}
+
+// DoRequestContext is DoRequest bound to ctx: cancelling ctx aborts the request.
+func (c *Client) DoRequestContext(ctx context.Context, endpoint string, target any, queryParams ...QueryParams) error {
 	values := c.URL.Query()
 
 	// merge all query params
@@ -98,7 +103,7 @@ func (c *Client) DoRequest(endpoint string, target any, queryParams ...QueryPara
 	endpointURL.RawQuery = values.Encode()
 	slog.Debug("Sending HTTP request", "url", endpointURL)
 
-	req, err := http.NewRequest(http.MethodGet, endpointURL.String(), nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpointURL.String(), nil)
 	if err != nil {
 		return fmt.Errorf("failed to create HTTP Request(%s): %w", endpointURL, err)
 	}
@@ -116,8 +121,13 @@ func (c *Client) DoRequest(endpoint string, target any, queryParams ...QueryPara
 
 // Get fetches an endpoint and decodes the JSON response into T.
 func Get[T any](c *Client, endpoint string, queryParams ...QueryParams) (T, error) {
+	return GetContext[T](context.Background(), c, endpoint, queryParams...)
+}
+
+// GetContext is Get bound to ctx.
+func GetContext[T any](ctx context.Context, c *Client, endpoint string, queryParams ...QueryParams) (T, error) {
 	var out T
-	err := c.DoRequest(endpoint, &out, queryParams...)
+	err := c.DoRequestContext(ctx, endpoint, &out, queryParams...)
 	return out, err
 }
 

@@ -1,16 +1,20 @@
 package collector
 
 import (
+	"fmt"
 	"github.com/onedr0p/exportarr/internal/assert"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	client "github.com/onedr0p/exportarr/internal/arr/client"
 	"github.com/onedr0p/exportarr/internal/arr/config"
 	"github.com/onedr0p/exportarr/internal/fixtures"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 )
 
@@ -126,4 +130,115 @@ func TestSonarrCollect_DisableWantedMetrics(t *testing.T) {
 	assert.Equal(t, testutil.CollectAndCount(collector, "sonarr_episode_missing_total", "sonarr_episode_cutoff_unmet_total"), 0,
 		"wanted series must be absent when disabled")
 	assert.Equal(t, testutil.CollectAndCount(collector, "sonarr_collector_error"), 0)
+}
+
+// fanoutServer serves n series and answers each per-series episodefile lookup
+// with episodeFile, recording how many lookups arrived and the peak number
+// in flight at once.
+func fanoutServer(t *testing.T, n int, episodeFile http.HandlerFunc) (*httptest.Server, *atomic.Int32, *atomic.Int32) {
+	t.Helper()
+	var calls, inFlight, peak atomic.Int32
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v3/series":
+			ids := make([]string, n)
+			for i := range ids {
+				ids[i] = fmt.Sprintf(`{"id":%d}`, i+1)
+			}
+			_, _ = fmt.Fprintf(w, "[%s]", strings.Join(ids, ","))
+		case "/api/v3/episodefile":
+			calls.Add(1)
+			cur := inFlight.Add(1)
+			defer inFlight.Add(-1)
+			for {
+				p := peak.Load()
+				if cur <= p || peak.CompareAndSwap(p, cur) {
+					break
+				}
+			}
+			episodeFile(w, r)
+		default:
+			_, _ = w.Write([]byte("[]"))
+		}
+	}))
+	return ts, &calls, &peak
+}
+
+// collectorFailed gathers c and reports whether it emitted an error gauge.
+func collectorFailed(t *testing.T, c prometheus.Collector) bool {
+	t.Helper()
+	registry := prometheus.NewPedanticRegistry()
+	registry.MustRegister(c)
+	families, err := registry.Gather()
+	assert.NoError(t, err)
+	for _, mf := range families {
+		if strings.HasSuffix(mf.GetName(), "collector_error") {
+			return true
+		}
+	}
+	return false
+}
+
+func sonarrFanoutConfig(url string) *config.ArrConfig {
+	return &config.ArrConfig{
+		App:                   "sonarr",
+		APIVersion:            "v3",
+		URL:                   url,
+		APIKey:                fixtures.APIKey,
+		DisableEpisodeMetrics: true,
+		DisableWantedMetrics:  true,
+	}
+}
+
+func TestSonarrCollect_FanoutStopsOnFirstError(t *testing.T) {
+	ts, calls, _ := fanoutServer(t, 100, func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+	})
+	defer ts.Close()
+
+	conf := sonarrFanoutConfig(ts.URL)
+	conf.SeriesConcurrency = 1
+	cl, err := client.NewClient(conf)
+	assert.NoError(t, err)
+
+	assert.True(t, collectorFailed(t, NewSonarrCollector(cl, conf)))
+	assert.True(t, calls.Load() <= 2, "expected the fan-out to stop after the first failure, got %d lookups", calls.Load())
+}
+
+func TestSonarrCollect_FanoutStopsAtCollectTimeout(t *testing.T) {
+	ts, calls, _ := fanoutServer(t, 100, func(_ http.ResponseWriter, r *http.Request) {
+		select {
+		case <-r.Context().Done():
+		case <-time.After(10 * time.Second):
+		}
+	})
+	defer ts.Close()
+
+	conf := sonarrFanoutConfig(ts.URL)
+	conf.SeriesConcurrency = 2
+	conf.CollectTimeout = 200 * time.Millisecond
+	cl, err := client.NewClient(conf)
+	assert.NoError(t, err)
+
+	start := time.Now()
+	assert.True(t, collectorFailed(t, NewSonarrCollector(cl, conf)))
+	assert.True(t, time.Since(start) < 5*time.Second, "collection should end at the collect timeout, took %s", time.Since(start))
+	assert.True(t, calls.Load() <= 2, "no lookups should start after the timeout, got %d", calls.Load())
+}
+
+func TestSonarrCollect_FanoutRespectsConcurrency(t *testing.T) {
+	ts, calls, peak := fanoutServer(t, 40, func(w http.ResponseWriter, _ *http.Request) {
+		time.Sleep(10 * time.Millisecond)
+		_, _ = w.Write([]byte("[]"))
+	})
+	defer ts.Close()
+
+	conf := sonarrFanoutConfig(ts.URL)
+	conf.SeriesConcurrency = 3
+	cl, err := client.NewClient(conf)
+	assert.NoError(t, err)
+
+	assert.False(t, collectorFailed(t, NewSonarrCollector(cl, conf)))
+	assert.Equal(t, calls.Load(), int32(40))
+	assert.True(t, peak.Load() <= 3, "peak concurrency %d exceeds the configured 3", peak.Load())
 }

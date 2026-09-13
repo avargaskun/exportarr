@@ -2,6 +2,7 @@
 package client
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -22,6 +23,11 @@ type QueryParams = client.QueryParams
 // Get fetches an endpoint from the *arr API and decodes the response into T.
 func Get[T any](c *Client, endpoint string, queryParams ...QueryParams) (T, error) {
 	return client.Get[T](c, endpoint, queryParams...)
+}
+
+// GetContext is Get bound to ctx.
+func GetContext[T any](ctx context.Context, c *Client, endpoint string, queryParams ...QueryParams) (T, error) {
+	return client.GetContext[T](ctx, c, endpoint, queryParams...)
 }
 
 // NewClient builds an authenticated client for the configured *arr instance.
