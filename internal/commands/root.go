@@ -2,11 +2,14 @@ package commands
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -33,13 +36,18 @@ var (
 		Long: `exportarr is a Prometheus exporter for *arr applications.
 It can export metrics from Radarr, Sonarr, Lidarr, Bazarr, Prowlarr and SABnzbd.
 More information available at the Github Repo (https://github.com/onedr0p/exportarr)`,
+		CompletionOptions: cobra.CompletionOptions{DisableDefaultCmd: true},
 		// Load + validate config and install the logger before any subcommand
 		// runs, returning errors instead of exiting so cobra can report them
-		// and defers still run. Help and completion skip config entirely.
+		// and defers still run. Help skips config entirely.
 		PersistentPreRunE: func(cmd *cobra.Command, _ []string) error {
 			switch cmd.Name() {
-			case "help", "completion", cobra.ShellCompRequestCmd, cobra.ShellCompNoDescRequestCmd:
+			case "help":
 				return nil
+			case cobra.ShellCompRequestCmd, cobra.ShellCompNoDescRequestCmd:
+				// cobra adds these hidden commands even with completion disabled,
+				// and they append to the file named by BASH_COMP_DEBUG_FILE.
+				return errors.New("shell completion is not supported")
 			}
 			var err error
 			conf, err = config.LoadConfig(cmd.Root().PersistentFlags())
@@ -170,7 +178,7 @@ func serveHTTP(fn registerFunc) error {
 	slog.Info("Starting HTTP Server",
 		"interface", conf.Interface,
 		"port", conf.Port)
-	srv.Addr = fmt.Sprintf("%s:%d", conf.Interface, conf.Port)
+	srv.Addr = listenAddr(conf)
 	srv.Handler = newHandler(conf, registry)
 
 	if err := srv.ListenAndServe(); err != http.ErrServerClosed {
@@ -178,6 +186,11 @@ func serveHTTP(fn registerFunc) error {
 	}
 	<-idleConnsClosed
 	return nil
+}
+
+// listenAddr joins the interface and port, bracketing IPv6 addresses.
+func listenAddr(conf *config.Config) string {
+	return net.JoinHostPort(conf.Interface, strconv.Itoa(conf.Port))
 }
 
 // sharedGatherer lets concurrent scrapes share one in-flight gather, so an

@@ -45,7 +45,6 @@ func TestLoadConfig_Defaults(t *testing.T) {
 	config, err := LoadArrConfig(c, flags)
 	assert.NoError(t, err)
 
-	assert.Equal(t, config.APIVersion, "v3")
 	assert.Equal(t, config.SeriesConcurrency, DefaultSeriesConcurrency)
 
 	// base config values are not overwritten
@@ -102,13 +101,20 @@ func TestLoadConfig_Environment(t *testing.T) {
 	assert.True(t, config.DisableQualityMetrics)
 
 	// defaults are not overwritten
-	assert.Equal(t, config.APIVersion, "v3")
+	assert.Equal(t, config.SeriesConcurrency, DefaultSeriesConcurrency)
 
 	// base config values are not overwritten
 	assert.Equal(t, config.URL, "http://localhost")
 	assert.Equal(t, config.APIKey, "abcdef0123456789abcdef0123456789")
 	assert.True(t, config.DisableSSLVerify)
 
+}
+
+func TestLoadConfig_IgnoresAPIVersionEnv(t *testing.T) {
+	t.Setenv("API_VERSION", "v9")
+	config, err := LoadArrConfig(base_config.Config{}, testFlagSet())
+	assert.NoError(t, err)
+	assert.Equal(t, config.APIVersion, "")
 }
 
 func TestLoadConfig_UnsetsFormAuthCredentials(t *testing.T) {
@@ -149,7 +155,7 @@ func TestLoadConfig_PartialEnvironment(t *testing.T) {
 	assert.Equal(t, config.URL, "http://localhost")
 	assert.Equal(t, config.APIKey, "abcdef0123456789abcdef0123456789")
 
-	assert.Equal(t, config.APIVersion, "v3")
+	assert.Equal(t, config.SeriesConcurrency, DefaultSeriesConcurrency)
 
 }
 
@@ -173,7 +179,7 @@ func TestLoadConfig_Flags(t *testing.T) {
 	assert.True(t, config.DisableEpisodeMetrics)
 
 	// defaults fall through
-	assert.Equal(t, config.APIVersion, "v3")
+	assert.Equal(t, config.SeriesConcurrency, DefaultSeriesConcurrency)
 }
 
 func TestValidate(t *testing.T) {

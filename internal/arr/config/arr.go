@@ -43,7 +43,7 @@ func RegisterArrFlags(flags *flag.FlagSet) {
 // ArrConfig is the configuration for an *arr exporter.
 type ArrConfig struct {
 	App                     string         `env:"-"`
-	APIVersion              string         `env:"API_VERSION" envDefault:"v3"`
+	APIVersion              string         `env:"-"` // fixed per command
 	AuthUsername            string         `env:"AUTH_USERNAME,unset"`
 	AuthPassword            string         `env:"AUTH_PASSWORD,unset"`
 	FormAuth                bool           `env:"FORM_AUTH"`
