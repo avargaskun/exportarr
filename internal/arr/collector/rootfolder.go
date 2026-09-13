@@ -34,11 +34,7 @@ func (collector *rootFolderCollector) Describe(ch chan<- *prometheus.Desc) {
 func (collector *rootFolderCollector) Collect(ch chan<- prometheus.Metric) {
 	log := slog.With("collector", "rootfolder")
 	defer recoverCollect(log, ch, collector.errorMetric)
-	c, err := client.NewClient(collector.config)
-	if err != nil {
-		emitError(log, ch, collector.errorMetric, "Error creating client", "error", err)
-		return
-	}
+	c := collector.client
 	rootFolders, err := client.Get[model.RootFolder](c, "rootfolder")
 	if err != nil {
 		emitError(log, ch, collector.errorMetric, "Error getting rootfolder", "error", err)

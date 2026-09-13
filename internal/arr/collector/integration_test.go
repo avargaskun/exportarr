@@ -93,3 +93,43 @@ func TestPerAppCollectorSets(t *testing.T) {
 		})
 	}
 }
+
+// TestCollectorsUseInjectedClient points the config at an unreachable address
+// so any collector that builds its own client from config fails the scrape
+// (or, for system status, reports the app as down).
+func TestCollectorsUseInjectedClient(t *testing.T) {
+	ts := fixtureServer(t, "../testdata/sonarr/")
+	defer ts.Close()
+
+	conf := &config.ArrConfig{
+		App:        "sonarr",
+		APIVersion: "v3",
+		URL:        ts.URL,
+		APIKey:     fixtures.APIKey,
+	}
+	cl, err := client.NewClient(conf)
+	assert.NoError(t, err)
+	conf.URL = "http://127.0.0.1:1"
+
+	registry := prometheus.NewPedanticRegistry()
+	registry.MustRegister(
+		NewSonarrCollector(cl, conf),
+		NewQueueCollector(cl, conf),
+		NewHistoryCollector(cl, conf),
+		NewRootFolderCollector(cl, conf),
+		NewDiskSpaceCollector(cl, conf),
+		NewSystemStatusCollector(cl, conf),
+		NewSystemHealthCollector(cl, conf),
+	)
+
+	families, err := registry.Gather()
+	assert.NoError(t, err)
+	status := -1.0
+	for _, mf := range families {
+		assert.NotContains(t, mf.GetName(), "_collector_error")
+		if mf.GetName() == "sonarr_system_status" {
+			status = mf.GetMetric()[0].GetGauge().GetValue()
+		}
+	}
+	assert.Equal(t, status, 1.0)
+}

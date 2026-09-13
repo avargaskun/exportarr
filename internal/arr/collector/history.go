@@ -34,11 +34,7 @@ func (collector *historyCollector) Describe(ch chan<- *prometheus.Desc) {
 func (collector *historyCollector) Collect(ch chan<- prometheus.Metric) {
 	log := slog.With("collector", "history")
 	defer recoverCollect(log, ch, collector.errorMetric)
-	c, err := client.NewClient(collector.config)
-	if err != nil {
-		emitError(log, ch, collector.errorMetric, "Error creating client", "error", err)
-		return
-	}
+	c := collector.client
 	// Only totalRecords is read: request the smallest page the API allows.
 	params := client.QueryParams{}
 	params.Add("pageSize", "1")

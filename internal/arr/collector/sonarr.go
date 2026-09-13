@@ -99,11 +99,7 @@ func (collector *sonarrCollector) Collect(ch chan<- prometheus.Metric) {
 		return
 	}
 	defer collector.collectMu.Unlock()
-	c, err := client.NewClient(collector.config)
-	if err != nil {
-		emitError(log, ch, collector.errorMetric, "Error creating client", "error", err)
-		return
-	}
+	c := collector.client
 	var seriesFileSize int64
 	var (
 		seriesDownloaded    = 0
