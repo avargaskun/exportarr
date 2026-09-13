@@ -2,10 +2,16 @@ package collector
 
 import (
 	"github.com/onedr0p/exportarr/internal/assert"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
+	client "github.com/onedr0p/exportarr/internal/arr/client"
+	"github.com/onedr0p/exportarr/internal/arr/config"
 	"github.com/onedr0p/exportarr/internal/arr/model"
+	"github.com/onedr0p/exportarr/internal/fixtures"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 )
@@ -53,4 +59,41 @@ func TestUnavailableIndexerEmitter(t *testing.T) {
 		`)
 	err := testutil.CollectAndCompare(testCol, expected)
 	assert.NoError(t, err)
+}
+
+func TestProwlarrCollect_PanicReleasesStatsLock(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/indexer":
+			_, _ = w.Write([]byte(`[{"name":"a","enable":true}]`))
+		case "/api/v1/indexerstats":
+			_, _ = w.Write([]byte(`{"indexers":[{"indexerName":"a","numberOfQueries":1}],"userAgents":[]}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer ts.Close()
+
+	conf := &config.ArrConfig{App: "prowlarr", APIVersion: "v1", URL: ts.URL, APIKey: fixtures.APIKey}
+	cl, err := client.NewClient(conf)
+	assert.NoError(t, err)
+	collector := NewProwlarrCollector(cl, conf).(*prowlarrCollector)
+
+	collector.indexerStatCache = newStatCache(func(model.IndexerStats, model.IndexerStats) model.IndexerStats {
+		panic("boom")
+	})
+	assert.True(t, collectorFailed(t, collector), "a panicking collection should raise the error gauge")
+
+	collector.indexerStatCache = newStatCache(mergeIndexerStats)
+	done := make(chan bool)
+	go func() {
+		failed, err := gatherErrorGauge(collector)
+		done <- err == nil && !failed
+	}()
+	select {
+	case ok := <-done:
+		assert.True(t, ok, "the next collection should succeed")
+	case <-time.After(5 * time.Second):
+		t.Fatal("the next collection is stuck on the stats lock")
+	}
 }

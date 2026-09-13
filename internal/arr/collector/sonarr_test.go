@@ -167,16 +167,28 @@ func fanoutServer(t *testing.T, n int, episodeFile http.HandlerFunc) (*httptest.
 // collectorFailed gathers c and reports whether it emitted an error gauge.
 func collectorFailed(t *testing.T, c prometheus.Collector) bool {
 	t.Helper()
-	registry := prometheus.NewPedanticRegistry()
-	registry.MustRegister(c)
-	families, err := registry.Gather()
+	failed, err := gatherErrorGauge(c)
 	assert.NoError(t, err)
+	return failed
+}
+
+// gatherErrorGauge is collectorFailed without the test assertions, for use
+// off the test goroutine.
+func gatherErrorGauge(c prometheus.Collector) (bool, error) {
+	registry := prometheus.NewRegistry()
+	if err := registry.Register(c); err != nil {
+		return false, err
+	}
+	families, err := registry.Gather()
+	if err != nil {
+		return false, err
+	}
 	for _, mf := range families {
 		if strings.HasSuffix(mf.GetName(), "collector_error") {
-			return true
+			return true, nil
 		}
 	}
-	return false
+	return false, nil
 }
 
 func sonarrFanoutConfig(url string) *config.ArrConfig {
