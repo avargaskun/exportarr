@@ -6,6 +6,8 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -178,4 +180,27 @@ func TestListenAddr(t *testing.T) {
 	} {
 		assert.Equal(t, listenAddr(&config.Config{Interface: tc.iface, Port: 9707}), tc.want)
 	}
+}
+
+func TestShellCompletionDisabled(t *testing.T) {
+	debugFile := filepath.Join(t.TempDir(), "comp-debug")
+	t.Setenv("BASH_COMP_DEBUG_FILE", debugFile)
+	rootCmd.SetOut(io.Discard)
+	rootCmd.SetErr(io.Discard)
+	t.Cleanup(func() {
+		rootCmd.SetArgs(nil)
+		rootCmd.SetOut(nil)
+		rootCmd.SetErr(nil)
+	})
+
+	for _, args := range [][]string{
+		{"completion", "bash"},
+		{"__complete", "sonarr", "--bogus", ""},
+		{"__completeNoDesc", "sonarr", "--bogus", ""},
+	} {
+		rootCmd.SetArgs(args)
+		assert.Error(t, rootCmd.Execute(), "%v should fail", args)
+	}
+	_, err := os.Stat(debugFile)
+	assert.True(t, os.IsNotExist(err), "BASH_COMP_DEBUG_FILE must not be written")
 }

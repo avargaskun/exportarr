@@ -2,6 +2,7 @@ package commands
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -35,13 +36,18 @@ var (
 		Long: `exportarr is a Prometheus exporter for *arr applications.
 It can export metrics from Radarr, Sonarr, Lidarr, Bazarr, Prowlarr and SABnzbd.
 More information available at the Github Repo (https://github.com/onedr0p/exportarr)`,
+		CompletionOptions: cobra.CompletionOptions{DisableDefaultCmd: true},
 		// Load + validate config and install the logger before any subcommand
 		// runs, returning errors instead of exiting so cobra can report them
-		// and defers still run. Help and completion skip config entirely.
+		// and defers still run. Help skips config entirely.
 		PersistentPreRunE: func(cmd *cobra.Command, _ []string) error {
 			switch cmd.Name() {
-			case "help", "completion", cobra.ShellCompRequestCmd, cobra.ShellCompNoDescRequestCmd:
+			case "help":
 				return nil
+			case cobra.ShellCompRequestCmd, cobra.ShellCompNoDescRequestCmd:
+				// cobra adds these hidden commands even with completion disabled,
+				// and they append to the file named by BASH_COMP_DEBUG_FILE.
+				return errors.New("shell completion is not supported")
 			}
 			var err error
 			conf, err = config.LoadConfig(cmd.Root().PersistentFlags())
