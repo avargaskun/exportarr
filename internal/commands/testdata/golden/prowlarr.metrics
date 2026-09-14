@@ -1,0 +1,100 @@
+# HELP exportarr_app_info A metric with a constant '1' value labeled by app name, version, build time, and revision.
+# TYPE exportarr_app_info gauge
+exportarr_app_info{app_name="exportarr",build_time="",revision="",version="development"} 1
+# HELP promhttp_metric_handler_errors_total Total number of internal errors encountered by the promhttp metric handler.
+# TYPE promhttp_metric_handler_errors_total counter
+promhttp_metric_handler_errors_total{cause="encoding"} 0
+promhttp_metric_handler_errors_total{cause="gathering"} 0
+# HELP prowlarr_history_total Total number of item in the history
+# TYPE prowlarr_history_total gauge
+prowlarr_history_total{url="http://fixture"} 1368
+# HELP prowlarr_indexer_auth_queries_total Total number of auth queries
+# TYPE prowlarr_indexer_auth_queries_total gauge
+prowlarr_indexer_auth_queries_total{indexer="1337x",url="http://fixture"} 0
+prowlarr_indexer_auth_queries_total{indexer="NZBgeek",url="http://fixture"} 0
+prowlarr_indexer_auth_queries_total{indexer="TorrentLeech",url="http://fixture"} 12
+# HELP prowlarr_indexer_average_response_time_ms Average response time of indexers in ms
+# TYPE prowlarr_indexer_average_response_time_ms gauge
+prowlarr_indexer_average_response_time_ms{indexer="1337x",url="http://fixture"} 1204
+prowlarr_indexer_average_response_time_ms{indexer="NZBgeek",url="http://fixture"} 412
+prowlarr_indexer_average_response_time_ms{indexer="TorrentLeech",url="http://fixture"} 655
+# HELP prowlarr_indexer_enabled_total Total number of enabled indexers
+# TYPE prowlarr_indexer_enabled_total gauge
+prowlarr_indexer_enabled_total{url="http://fixture"} 2
+# HELP prowlarr_indexer_failed_auth_queries_total Total number of failed auth queries
+# TYPE prowlarr_indexer_failed_auth_queries_total gauge
+prowlarr_indexer_failed_auth_queries_total{indexer="1337x",url="http://fixture"} 0
+prowlarr_indexer_failed_auth_queries_total{indexer="NZBgeek",url="http://fixture"} 0
+prowlarr_indexer_failed_auth_queries_total{indexer="TorrentLeech",url="http://fixture"} 2
+# HELP prowlarr_indexer_failed_grabs_total Total number of failed grabs
+# TYPE prowlarr_indexer_failed_grabs_total gauge
+prowlarr_indexer_failed_grabs_total{indexer="1337x",url="http://fixture"} 0
+prowlarr_indexer_failed_grabs_total{indexer="NZBgeek",url="http://fixture"} 2
+prowlarr_indexer_failed_grabs_total{indexer="TorrentLeech",url="http://fixture"} 6
+# HELP prowlarr_indexer_failed_queries_total Total number of failed queries
+# TYPE prowlarr_indexer_failed_queries_total gauge
+prowlarr_indexer_failed_queries_total{indexer="1337x",url="http://fixture"} 14
+prowlarr_indexer_failed_queries_total{indexer="NZBgeek",url="http://fixture"} 24
+prowlarr_indexer_failed_queries_total{indexer="TorrentLeech",url="http://fixture"} 50
+# HELP prowlarr_indexer_failed_rss_queries_total Total number of failed rss queries
+# TYPE prowlarr_indexer_failed_rss_queries_total gauge
+prowlarr_indexer_failed_rss_queries_total{indexer="1337x",url="http://fixture"} 0
+prowlarr_indexer_failed_rss_queries_total{indexer="NZBgeek",url="http://fixture"} 8
+prowlarr_indexer_failed_rss_queries_total{indexer="TorrentLeech",url="http://fixture"} 18
+# HELP prowlarr_indexer_grabs_total Total number of grabs
+# TYPE prowlarr_indexer_grabs_total gauge
+prowlarr_indexer_grabs_total{indexer="1337x",url="http://fixture"} 0
+prowlarr_indexer_grabs_total{indexer="NZBgeek",url="http://fixture"} 174
+prowlarr_indexer_grabs_total{indexer="TorrentLeech",url="http://fixture"} 84
+# HELP prowlarr_indexer_queries_total Total number of queries
+# TYPE prowlarr_indexer_queries_total gauge
+prowlarr_indexer_queries_total{indexer="1337x",url="http://fixture"} 28
+prowlarr_indexer_queries_total{indexer="NZBgeek",url="http://fixture"} 3040
+prowlarr_indexer_queries_total{indexer="TorrentLeech",url="http://fixture"} 1660
+# HELP prowlarr_indexer_rss_queries_total Total number of rss queries
+# TYPE prowlarr_indexer_rss_queries_total gauge
+prowlarr_indexer_rss_queries_total{indexer="1337x",url="http://fixture"} 0
+prowlarr_indexer_rss_queries_total{indexer="NZBgeek",url="http://fixture"} 1920
+prowlarr_indexer_rss_queries_total{indexer="TorrentLeech",url="http://fixture"} 820
+# HELP prowlarr_indexer_total Total number of configured indexers
+# TYPE prowlarr_indexer_total gauge
+prowlarr_indexer_total{url="http://fixture"} 3
+# HELP prowlarr_indexer_unavailable Indexers marked unavailable due to repeated errors
+# TYPE prowlarr_indexer_unavailable gauge
+prowlarr_indexer_unavailable{indexer="SomeIndexer",url="http://fixture"} 1
+# HELP prowlarr_scrape_duration_seconds Distribution of scrape durations.
+# TYPE prowlarr_scrape_duration_seconds histogram
+prowlarr_scrape_duration_seconds_bucket{url="http://fixture",le="0.1"} X
+prowlarr_scrape_duration_seconds_bucket{url="http://fixture",le="0.25"} X
+prowlarr_scrape_duration_seconds_bucket{url="http://fixture",le="0.5"} X
+prowlarr_scrape_duration_seconds_bucket{url="http://fixture",le="1"} X
+prowlarr_scrape_duration_seconds_bucket{url="http://fixture",le="2.5"} X
+prowlarr_scrape_duration_seconds_bucket{url="http://fixture",le="5"} X
+prowlarr_scrape_duration_seconds_bucket{url="http://fixture",le="10"} X
+prowlarr_scrape_duration_seconds_bucket{url="http://fixture",le="30"} X
+prowlarr_scrape_duration_seconds_bucket{url="http://fixture",le="60"} X
+prowlarr_scrape_duration_seconds_bucket{url="http://fixture",le="+Inf"} X
+prowlarr_scrape_duration_seconds_sum{url="http://fixture"} X
+prowlarr_scrape_duration_seconds_count{url="http://fixture"} X
+# HELP prowlarr_scrape_requests_total Total number of HTTP requests made.
+# TYPE prowlarr_scrape_requests_total counter
+prowlarr_scrape_requests_total{code="200",url="http://fixture"} 1
+# HELP prowlarr_system_health_issues Total number of health issues by source, type, message and wikiurl
+# TYPE prowlarr_system_health_issues gauge
+prowlarr_system_health_issues{message="Indexers unavailable due to failures for more than 6 hours: SomeIndexer",source="IndexerLongTermStatusCheck",type="warning",url="http://fixture",wikiurl="https://wiki.servarr.com/sonarr/system#indexers-are-unavailable-due-to-failures"} 1
+# HELP prowlarr_system_status System Status
+# TYPE prowlarr_system_status gauge
+prowlarr_system_status{url="http://fixture"} 1
+# HELP prowlarr_user_agent_grabs_total Total number of grabs
+# TYPE prowlarr_user_agent_grabs_total gauge
+prowlarr_user_agent_grabs_total{url="http://fixture",user_agent="Lidarr"} 0
+prowlarr_user_agent_grabs_total{url="http://fixture",user_agent="Radarr"} 116
+prowlarr_user_agent_grabs_total{url="http://fixture",user_agent="Sonarr"} 142
+# HELP prowlarr_user_agent_queries_total Total number of queries
+# TYPE prowlarr_user_agent_queries_total gauge
+prowlarr_user_agent_queries_total{url="http://fixture",user_agent="Lidarr"} 28
+prowlarr_user_agent_queries_total{url="http://fixture",user_agent="Radarr"} 1880
+prowlarr_user_agent_queries_total{url="http://fixture",user_agent="Sonarr"} 2820
+# HELP prowlarr_user_agent_total Total number of active user agents
+# TYPE prowlarr_user_agent_total gauge
+prowlarr_user_agent_total{url="http://fixture"} 3

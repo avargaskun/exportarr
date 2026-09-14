@@ -1,8 +1,6 @@
 package collector
 
 import (
-	"log/slog"
-
 	"github.com/onedr0p/exportarr/internal/arr/client"
 	"github.com/onedr0p/exportarr/internal/arr/config"
 	"github.com/onedr0p/exportarr/internal/arr/model"
@@ -41,7 +39,7 @@ func (collector *diskSpaceCollector) Describe(ch chan<- *prometheus.Desc) {
 
 // Collect implements prometheus.Collector.
 func (collector *diskSpaceCollector) Collect(ch chan<- prometheus.Metric) {
-	log := slog.With("collector", "diskspace")
+	log := collectorLogger(collector.config, "diskspace")
 	defer recoverCollect(log, ch, collector.errorMetric)
 	ctx, cancel := collectContext(collector.config)
 	defer cancel()

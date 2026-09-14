@@ -1,0 +1,53 @@
+{
+  "id": 1,
+  "indexers": [
+    {
+      "indexerId": 1,
+      "indexerName": "NZBgeek",
+      "averageResponseTime": 412,
+      "averageGrabResponseTime": 280,
+      "numberOfQueries": 1520,
+      "numberOfGrabs": 87,
+      "numberOfRssQueries": 960,
+      "numberOfAuthQueries": 0,
+      "numberOfFailedQueries": 12,
+      "numberOfFailedGrabs": 1,
+      "numberOfFailedRssQueries": 4,
+      "numberOfFailedAuthQueries": 0
+    },
+    {
+      "indexerId": 2,
+      "indexerName": "TorrentLeech",
+      "averageResponseTime": 655,
+      "averageGrabResponseTime": 390,
+      "numberOfQueries": 830,
+      "numberOfGrabs": 42,
+      "numberOfRssQueries": 410,
+      "numberOfAuthQueries": 6,
+      "numberOfFailedQueries": 25,
+      "numberOfFailedGrabs": 3,
+      "numberOfFailedRssQueries": 9,
+      "numberOfFailedAuthQueries": 1
+    },
+    {
+      "indexerId": 3,
+      "indexerName": "1337x",
+      "averageResponseTime": 1204,
+      "averageGrabResponseTime": 0,
+      "numberOfQueries": 14,
+      "numberOfGrabs": 0,
+      "numberOfRssQueries": 0,
+      "numberOfAuthQueries": 0,
+      "numberOfFailedQueries": 7,
+      "numberOfFailedGrabs": 0,
+      "numberOfFailedRssQueries": 0,
+      "numberOfFailedAuthQueries": 0
+    }
+  ],
+  "userAgents": [
+    { "userAgent": "Sonarr", "numberOfQueries": 1410, "numberOfGrabs": 71 },
+    { "userAgent": "Radarr", "numberOfQueries": 940, "numberOfGrabs": 58 },
+    { "userAgent": "Lidarr", "numberOfQueries": 14, "numberOfGrabs": 0 }
+  ],
+  "hosts": [{ "host": "localhost", "numberOfQueries": 2364, "numberOfGrabs": 129 }]
+}

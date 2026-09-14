@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -151,6 +152,22 @@ func TestDoRequest_RedactsURLInErrorsAndLogs(t *testing.T) {
 	assert.NotContains(t, err.Error(), "hunter2")
 	assert.Contains(t, logs.String(), addr+"/base/queue")
 	assert.NotContains(t, logs.String(), "hunter2")
+}
+
+func TestRedactURL(t *testing.T) {
+	cases := []struct {
+		in, want string
+	}{
+		{"http://sonarr:8989", "http://sonarr:8989"},
+		{"https://user:pw@radarr.example:7878/base/api?apikey=k#frag", "https://radarr.example:7878/base/api"},
+		{"http://sab:8080/sabnzbd/api?mode=queue&apikey=k", "http://sab:8080/sabnzbd/api"},
+		{"http://[::1]:9696/", "http://[::1]:9696/"},
+	}
+	for _, tc := range cases {
+		u, err := url.Parse(tc.in)
+		assert.NoError(t, err)
+		assert.Equal(t, RedactURL(u), tc.want)
+	}
 }
 
 type panicOnDecode struct{}

@@ -1,0 +1,55 @@
+# HELP exportarr_app_info A metric with a constant '1' value labeled by app name, version, build time, and revision.
+# TYPE exportarr_app_info gauge
+exportarr_app_info{app_name="exportarr",build_time="",revision="",version="development"} 1
+# HELP promhttp_metric_handler_errors_total Total number of internal errors encountered by the promhttp metric handler.
+# TYPE promhttp_metric_handler_errors_total counter
+promhttp_metric_handler_errors_total{cause="encoding"} 0
+promhttp_metric_handler_errors_total{cause="gathering"} 0
+# HELP sabnzbd_collector_error Error while collecting metrics from SABnzbd
+# TYPE sabnzbd_collector_error gauge
+sabnzbd_collector_error{url="http://fixture"} 1
+# HELP sabnzbd_queue_query_duration_seconds Distribution of queue endpoint query durations
+# TYPE sabnzbd_queue_query_duration_seconds histogram
+sabnzbd_queue_query_duration_seconds_bucket{url="http://fixture",le="0.05"} X
+sabnzbd_queue_query_duration_seconds_bucket{url="http://fixture",le="0.1"} X
+sabnzbd_queue_query_duration_seconds_bucket{url="http://fixture",le="0.25"} X
+sabnzbd_queue_query_duration_seconds_bucket{url="http://fixture",le="0.5"} X
+sabnzbd_queue_query_duration_seconds_bucket{url="http://fixture",le="1"} X
+sabnzbd_queue_query_duration_seconds_bucket{url="http://fixture",le="2.5"} X
+sabnzbd_queue_query_duration_seconds_bucket{url="http://fixture",le="5"} X
+sabnzbd_queue_query_duration_seconds_bucket{url="http://fixture",le="10"} X
+sabnzbd_queue_query_duration_seconds_bucket{url="http://fixture",le="30"} X
+sabnzbd_queue_query_duration_seconds_bucket{url="http://fixture",le="+Inf"} X
+sabnzbd_queue_query_duration_seconds_sum{url="http://fixture"} X
+sabnzbd_queue_query_duration_seconds_count{url="http://fixture"} X
+# HELP sabnzbd_scrape_duration_seconds Distribution of scrape durations.
+# TYPE sabnzbd_scrape_duration_seconds histogram
+sabnzbd_scrape_duration_seconds_bucket{url="http://fixture",le="0.1"} X
+sabnzbd_scrape_duration_seconds_bucket{url="http://fixture",le="0.25"} X
+sabnzbd_scrape_duration_seconds_bucket{url="http://fixture",le="0.5"} X
+sabnzbd_scrape_duration_seconds_bucket{url="http://fixture",le="1"} X
+sabnzbd_scrape_duration_seconds_bucket{url="http://fixture",le="2.5"} X
+sabnzbd_scrape_duration_seconds_bucket{url="http://fixture",le="5"} X
+sabnzbd_scrape_duration_seconds_bucket{url="http://fixture",le="10"} X
+sabnzbd_scrape_duration_seconds_bucket{url="http://fixture",le="30"} X
+sabnzbd_scrape_duration_seconds_bucket{url="http://fixture",le="60"} X
+sabnzbd_scrape_duration_seconds_bucket{url="http://fixture",le="+Inf"} X
+sabnzbd_scrape_duration_seconds_sum{url="http://fixture"} X
+sabnzbd_scrape_duration_seconds_count{url="http://fixture"} X
+# HELP sabnzbd_scrape_requests_total Total number of HTTP requests made.
+# TYPE sabnzbd_scrape_requests_total counter
+sabnzbd_scrape_requests_total{code="200",url="http://fixture"} 1
+# HELP sabnzbd_server_stats_query_duration_seconds Distribution of server_stats endpoint query durations
+# TYPE sabnzbd_server_stats_query_duration_seconds histogram
+sabnzbd_server_stats_query_duration_seconds_bucket{url="http://fixture",le="0.05"} X
+sabnzbd_server_stats_query_duration_seconds_bucket{url="http://fixture",le="0.1"} X
+sabnzbd_server_stats_query_duration_seconds_bucket{url="http://fixture",le="0.25"} X
+sabnzbd_server_stats_query_duration_seconds_bucket{url="http://fixture",le="0.5"} X
+sabnzbd_server_stats_query_duration_seconds_bucket{url="http://fixture",le="1"} X
+sabnzbd_server_stats_query_duration_seconds_bucket{url="http://fixture",le="2.5"} X
+sabnzbd_server_stats_query_duration_seconds_bucket{url="http://fixture",le="5"} X
+sabnzbd_server_stats_query_duration_seconds_bucket{url="http://fixture",le="10"} X
+sabnzbd_server_stats_query_duration_seconds_bucket{url="http://fixture",le="30"} X
+sabnzbd_server_stats_query_duration_seconds_bucket{url="http://fixture",le="+Inf"} X
+sabnzbd_server_stats_query_duration_seconds_sum{url="http://fixture"} X
+sabnzbd_server_stats_query_duration_seconds_count{url="http://fixture"} X

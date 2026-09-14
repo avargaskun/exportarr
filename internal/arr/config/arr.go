@@ -11,6 +11,7 @@ import (
 	"github.com/caarlos0/env/v11"
 	flag "github.com/spf13/pflag"
 
+	"github.com/onedr0p/exportarr/internal/client"
 	base_config "github.com/onedr0p/exportarr/internal/config"
 )
 
@@ -62,6 +63,8 @@ type ArrConfig struct {
 	CollectTimeout          time.Duration  `env:"-"` // from the base config
 	Prowlarr                ProwlarrConfig `envPrefix:"PROWLARR__"`
 	Bazarr                  BazarrConfig   `envPrefix:"BAZARR__"`
+	Target                  string         `env:"-"` // empty in single-target mode
+	UpstreamLimiter         client.Limiter `env:"-"` // nil (unlimited) in single-target mode
 }
 
 // UseFormAuth reports whether form-based authentication is enabled.
@@ -75,18 +78,23 @@ func (c *ArrConfig) BaseURL() string {
 	return ret
 }
 
+// ApplyBase copies the fields that come from the base configuration: app,
+// URL, API key, connection options and the request/collect timeouts.
+func (c *ArrConfig) ApplyBase(conf base_config.Config) {
+	c.App = conf.App
+	c.URL = conf.URL
+	c.APIKey = conf.APIKey
+	c.DisableSSLVerify = conf.DisableSSLVerify
+	c.ProxyFromEnv = conf.ProxyFromEnv
+	c.RequestTimeout = conf.RequestTimeout
+	c.CollectTimeout = conf.CollectTimeout()
+}
+
 // LoadArrConfig parses environment variables into an ArrConfig seeded from the
 // base configuration, then overlays any explicitly-set flags.
 func LoadArrConfig(conf base_config.Config, flags *flag.FlagSet) (*ArrConfig, error) {
-	out := &ArrConfig{
-		App:              conf.App,
-		URL:              conf.URL,
-		APIKey:           conf.APIKey,
-		DisableSSLVerify: conf.DisableSSLVerify,
-		ProxyFromEnv:     conf.ProxyFromEnv,
-		RequestTimeout:   conf.RequestTimeout,
-		CollectTimeout:   conf.CollectTimeout(),
-	}
+	out := &ArrConfig{}
+	out.ApplyBase(conf)
 	if err := env.Parse(out); err != nil {
 		return nil, err
 	}

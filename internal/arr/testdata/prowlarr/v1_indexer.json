@@ -1,0 +1,60 @@
+[
+  {
+    "id": 1,
+    "name": "NZBgeek",
+    "sortName": "nzbgeek",
+    "enable": true,
+    "redirect": false,
+    "supportsRss": true,
+    "supportsSearch": true,
+    "protocol": "usenet",
+    "privacy": "private",
+    "priority": 25,
+    "appProfileId": 1,
+    "implementation": "Newznab",
+    "definitionName": "nzbgeek",
+    "fields": [
+      { "name": "baseUrl", "value": "https://api.nzbgeek.info" },
+      { "name": "apiPath", "value": "/api" }
+    ],
+    "tags": []
+  },
+  {
+    "id": 2,
+    "name": "TorrentLeech",
+    "sortName": "torrentleech",
+    "enable": true,
+    "redirect": false,
+    "supportsRss": true,
+    "supportsSearch": true,
+    "protocol": "torrent",
+    "privacy": "private",
+    "priority": 25,
+    "appProfileId": 1,
+    "implementation": "Cardigann",
+    "definitionName": "torrentleech",
+    "fields": [
+      { "name": "definitionFile", "value": "torrentleech" },
+      { "name": "username", "value": "fixture-user" },
+      { "name": "password", "value": "fixture-tracker-password" }
+    ],
+    "tags": [1]
+  },
+  {
+    "id": 3,
+    "name": "1337x",
+    "sortName": "1337x",
+    "enable": false,
+    "redirect": false,
+    "supportsRss": true,
+    "supportsSearch": true,
+    "protocol": "torrent",
+    "privacy": "public",
+    "priority": 50,
+    "appProfileId": 1,
+    "implementation": "Cardigann",
+    "definitionName": "1337x",
+    "fields": [{ "name": "definitionFile", "value": "1337x" }],
+    "tags": []
+  }
+]

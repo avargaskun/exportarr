@@ -1,14 +1,18 @@
 package collector
 
 import (
+	"bytes"
 	"github.com/onedr0p/exportarr/internal/assert"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/onedr0p/exportarr/internal/fixtures"
 	"github.com/onedr0p/exportarr/internal/sabnzbd/config"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 )
@@ -132,4 +136,82 @@ func TestCollect_StopsAtCollectTimeout(t *testing.T) {
 	start := time.Now()
 	assert.Equal(t, testutil.CollectAndCount(collector, "sabnzbd_collector_error"), 1)
 	assert.True(t, time.Since(start) < 5*time.Second, "collection took %s", time.Since(start))
+}
+
+func captureDefaultLog(t *testing.T) *syncBuffer {
+	t.Helper()
+	saved := slog.Default()
+	t.Cleanup(func() { slog.SetDefault(saved) })
+	buf := &syncBuffer{}
+	slog.SetDefault(slog.New(slog.NewTextHandler(buf, nil)))
+	return buf
+}
+
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *syncBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *syncBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
+func TestCollect_ErrorLinesCarryTarget(t *testing.T) {
+	for _, target := range []string{"", "sab-main"} {
+		t.Run("target="+target, func(t *testing.T) {
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(http.StatusBadRequest)
+			}))
+			defer ts.Close()
+
+			collector, err := NewSabnzbdCollector(&config.SabnzbdConfig{
+				URL:    ts.URL,
+				APIKey: testAPIKey,
+				Target: target,
+			})
+			assert.NoError(t, err)
+
+			logs := captureDefaultLog(t)
+			assert.Equal(t, testutil.CollectAndCount(collector, "sabnzbd_collector_error"), 1)
+
+			var errorLines int
+			for line := range strings.Lines(logs.String()) {
+				if !strings.Contains(line, "level=ERROR") {
+					continue
+				}
+				errorLines++
+				if target == "" {
+					assert.NotContains(t, line, "target=")
+				} else {
+					assert.Contains(t, line, "target="+target)
+				}
+			}
+			assert.True(t, errorLines > 0, "no error lines in:\n%s", logs.String())
+		})
+	}
+}
+
+func TestCollect_PassesThroughLimiter(t *testing.T) {
+	fake := fixtures.NewFakeApp(t, fixtures.FakeAppOptions{App: "sabnzbd", APIKey: testAPIKey})
+	lim := fixtures.NewCountingLimiter(0)
+	collector, err := NewSabnzbdCollector(&config.SabnzbdConfig{
+		URL:             fake.URL,
+		APIKey:          testAPIKey,
+		CollectTimeout:  10 * time.Second,
+		UpstreamLimiter: lim,
+	})
+	assert.NoError(t, err)
+
+	assert.Equal(t, testutil.CollectAndCount(collector, "sabnzbd_collector_error"), 0)
+	assert.Equal(t, lim.Acquires(), int64(2), "queue and server_stats must each take a slot")
+	assert.Equal(t, lim.Outstanding(), int64(0))
+	assert.Len(t, fake.Requests(), 2)
 }

@@ -1,0 +1,5 @@
+level=ERROR msg="Error creating client" collector=lidarr error="failed to execute HTTP Request(http://fixture/api/v1/artist): received Server Error Status Code: 500"
+level=ERROR msg="Error creating client" collector=lidarr error="failed to execute HTTP Request(http://fixture/api/v1/artist): received Server Error Status Code: 500"
+level=INFO msg="Shutting down due to signal" signal=terminated
+level=INFO msg="Starting HTTP Server" interface=0.0.0.0 port=9707
+level=INFO msg="Starting exportarr" app_name=exportarr version=development buildTime="" revision=""

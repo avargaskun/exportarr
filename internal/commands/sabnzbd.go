@@ -16,21 +16,27 @@ var sabnzbdCmd = &cobra.Command{
 	Aliases: []string{"sab"},
 	Short:   "Prometheus Exporter for Sabnzbd",
 	Long:    "Prometheus Exporter for Sabnzbd.",
-	RunE: func(_ *cobra.Command, _ []string) error {
+	RunE: func(cmd *cobra.Command, _ []string) error {
 		c, err := config.LoadSabnzbdConfig(*conf)
 		if err != nil {
 			return err
 		}
-		if err := c.Validate(); err != nil {
-			return err
-		}
-
-		collector, err := collector.NewSabnzbdCollector(c)
+		cs, err := buildSabnzbd(c)
 		if err != nil {
 			return err
 		}
-		return serveHTTP(func(r prometheus.Registerer) {
-			r.MustRegister(collector)
-		})
+		return serveHTTP(cmd.Context(), conf.ScrapeTimeout, singleTargetHandler(cs...))
 	},
+}
+
+// buildSabnzbd validates a resolved config and constructs the SABnzbd collector.
+func buildSabnzbd(c *config.SabnzbdConfig) ([]prometheus.Collector, error) {
+	if err := c.Validate(); err != nil {
+		return nil, err
+	}
+	sab, err := collector.NewSabnzbdCollector(c)
+	if err != nil {
+		return nil, err
+	}
+	return []prometheus.Collector{sab}, nil
 }

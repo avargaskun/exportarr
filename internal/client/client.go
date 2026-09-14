@@ -41,6 +41,8 @@ type TransportOptions struct {
 	// ProxyFromEnvironment honors HTTP(S)_PROXY/NO_PROXY. Off by default: a
 	// proxy would see the API key, session cookies and form credentials.
 	ProxyFromEnvironment bool
+	// Limiter caps concurrent upstream attempts; nil means unlimited.
+	Limiter Limiter
 }
 
 // NewClient method initializes a new *Arr client.
@@ -113,7 +115,7 @@ func (c *Client) DoRequestContext(ctx context.Context, endpoint string, target a
 
 	endpointURL := c.URL.JoinPath(endpoint)
 	endpointURL.RawQuery = values.Encode()
-	logURL := redactURL(endpointURL)
+	logURL := RedactURL(endpointURL)
 	slog.Debug("Sending HTTP request", "url", logURL)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpointURL.String(), nil)
@@ -150,15 +152,15 @@ func GetContext[T any](ctx context.Context, c *Client, endpoint string, queryPar
 	return out, err
 }
 
-// redactURL renders u as scheme://host[:port]/path, dropping the userinfo,
+// RedactURL renders u as scheme://host[:port]/path, dropping the userinfo,
 // query and fragment, any of which can carry credentials.
-func redactURL(u *url.URL) string {
+func RedactURL(u *url.URL) string {
 	return (&url.URL{Scheme: u.Scheme, Host: u.Host, Path: u.Path}).String()
 }
 
-// BaseTransport returns a clone of the default transport configured by opts.
-// Cloning keeps these settings scoped to this client instead of mutating the
-// process-wide http.DefaultTransport.
+// BaseTransport returns a clone of the default transport configured by opts,
+// wrapped in the limiter when one is set. Cloning keeps these settings scoped
+// to this client instead of mutating the process-wide http.DefaultTransport.
 func BaseTransport(opts TransportOptions) http.RoundTripper {
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	// Every collector in a command scrapes the same host concurrently; the
@@ -171,5 +173,8 @@ func BaseTransport(opts TransportOptions) http.RoundTripper {
 	if opts.InsecureSkipVerify {
 		transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true} //nolint:gosec // opt-in via --disable-ssl-verify
 	}
-	return transport
+	if opts.Limiter == nil {
+		return transport
+	}
+	return &limitedTransport{inner: transport, limiter: opts.Limiter}
 }

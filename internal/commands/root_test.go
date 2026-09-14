@@ -2,14 +2,20 @@ package commands
 
 import (
 	"bytes"
+	"context"
+	"errors"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
+	"slices"
 	"strings"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 
@@ -134,22 +140,131 @@ func TestHandler_ConcurrentScrapesShareOneGather(t *testing.T) {
 	assert.Equal(t, blocking.calls.Load(), int32(1))
 }
 
-func TestHandler_ScrapeTimeout(t *testing.T) {
+func metricsStackServer(t *testing.T, o stackOpts, cs ...prometheus.Collector) *httptest.Server {
+	t.Helper()
+	registry := prometheus.NewRegistry()
+	registry.MustRegister(cs...)
+	ts := httptest.NewServer(newMetricsHandler(o, registry))
+	t.Cleanup(ts.Close)
+	return ts
+}
+
+func TestNewMetricsHandler_ScrapeTimeout(t *testing.T) {
 	blocking := newBlockingCollector()
 	defer close(blocking.release)
-	ts := testServer(t, 100*time.Millisecond, blocking)
+	ts := metricsStackServer(t, stackOpts{app: "test", url: "http://target", scrapeTimeout: 100 * time.Millisecond}, blocking)
 
-	code, body := get(t, http.MethodGet, ts.URL+"/metrics")
+	code, body := get(t, http.MethodGet, ts.URL)
 	assert.Equal(t, code, http.StatusServiceUnavailable)
 	assert.True(t, strings.Contains(body, "timeout"), "unexpected body %q", body)
 }
 
+func TestNewMetricsHandler_MaxRequestsInFlight(t *testing.T) {
+	blocking := newBlockingCollector()
+	o := stackOpts{app: "test", url: "http://target", scrapeTimeout: time.Minute}
+	registry := prometheus.NewRegistry()
+	registry.MustRegister(blocking)
+	handler := newMetricsHandler(o, registry)
+	var arrived atomic.Int32
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		arrived.Add(1)
+		handler.ServeHTTP(w, r)
+	}))
+	defer ts.Close()
+
+	codes := make(chan int, maxScrapesInFlight)
+	for range maxScrapesInFlight {
+		go func() {
+			resp, err := http.Get(ts.URL)
+			if err != nil {
+				codes <- 0
+				return
+			}
+			_, _ = io.Copy(io.Discard, resp.Body)
+			_ = resp.Body.Close()
+			codes <- resp.StatusCode
+		}()
+	}
+	<-blocking.started
+	for arrived.Load() < maxScrapesInFlight {
+		time.Sleep(10 * time.Millisecond)
+	}
+	time.Sleep(50 * time.Millisecond)
+
+	code, body := get(t, http.MethodGet, ts.URL)
+	assert.Equal(t, code, http.StatusServiceUnavailable)
+	assert.Contains(t, body, "Limit of concurrent requests reached")
+
+	close(blocking.release)
+	for range maxScrapesInFlight {
+		assert.Equal(t, <-codes, http.StatusOK)
+	}
+
+	_, body = get(t, http.MethodGet, ts.URL)
+	assert.Contains(t, body, `test_scrape_requests_total{code="200",url="http://target"} 2`)
+	assert.Contains(t, body, `test_scrape_requests_total{code="503",url="http://target"} 1`)
+}
+
 func TestServerTimeouts(t *testing.T) {
-	srv := newServer(&config.Config{ScrapeTimeout: 2 * time.Minute})
+	srv := newServer(2 * time.Minute)
 	assert.Equal(t, srv.ReadHeaderTimeout, 10*time.Second)
 	assert.Equal(t, srv.ReadTimeout, 30*time.Second)
 	assert.Equal(t, srv.IdleTimeout, 60*time.Second)
-	assert.True(t, srv.WriteTimeout > 2*time.Minute, "WriteTimeout %s must exceed the scrape timeout", srv.WriteTimeout)
+	assert.Equal(t, srv.WriteTimeout, 2*time.Minute+10*time.Second)
+}
+
+func useAppInfo(t *testing.T) {
+	t.Helper()
+	saved := appInfo
+	t.Cleanup(func() { appInfo = saved })
+	appInfo = &AppInfo{Name: "exportarr", Version: "1.2.3", BuildTime: "now", Revision: "abc"}
+}
+
+func TestNewSelfRegistry(t *testing.T) {
+	useAppInfo(t)
+	mfs, err := newSelfRegistry().Gather()
+	assert.NoError(t, err)
+	names := map[string]bool{}
+	for _, mf := range mfs {
+		names[mf.GetName()] = true
+	}
+	assert.True(t, names["exportarr_app_info"], "missing exportarr_app_info in %v", names)
+	assert.True(t, names["go_goroutines"], "missing go_goroutines in %v", names)
+	switch runtime.GOOS {
+	case "linux", "darwin", "windows":
+		assert.True(t, names["process_cpu_seconds_total"], "missing process_cpu_seconds_total in %v", names)
+	}
+}
+
+type constCollector struct{ desc *prometheus.Desc }
+
+func (c constCollector) Describe(ch chan<- *prometheus.Desc) { ch <- c.desc }
+
+func (c constCollector) Collect(ch chan<- prometheus.Metric) {
+	ch <- prometheus.MustNewConstMetric(c.desc, prometheus.GaugeValue, 42)
+}
+
+func TestSingleTargetHandler(t *testing.T) {
+	useAppInfo(t)
+	savedConf := conf
+	t.Cleanup(func() { conf = savedConf })
+	conf = &config.Config{App: "radarr", URL: "http://radarr:7878", ScrapeTimeout: time.Minute}
+
+	ts := httptest.NewServer(singleTargetHandler(constCollector{prometheus.NewDesc("extra_series", "test", nil, nil)}))
+	defer ts.Close()
+
+	code, body := get(t, http.MethodGet, ts.URL+"/metrics")
+	assert.Equal(t, code, http.StatusOK)
+	assert.Contains(t, body, "extra_series 42")
+	assert.Contains(t, body, `exportarr_app_info{app_name="exportarr",build_time="now",revision="abc",version="1.2.3"} 1`)
+	assert.Contains(t, body, "go_goroutines")
+
+	_, body = get(t, http.MethodGet, ts.URL+"/metrics")
+	assert.Contains(t, body, `radarr_scrape_requests_total{code="200",url="http://radarr:7878"} 1`)
+
+	code, body = get(t, http.MethodGet, ts.URL+"/healthz")
+	assert.Equal(t, code, http.StatusOK)
+	assert.Equal(t, body, "OK")
 }
 
 func TestWarnSecretFlags(t *testing.T) {
@@ -213,5 +328,221 @@ func TestHandler_DoesNotServeDebugEndpoints(t *testing.T) {
 		assert.NotContains(t, body, "memstats")
 		assert.NotContains(t, body, "cmdline")
 		assert.NotContains(t, body, "goroutine")
+	}
+}
+
+func useServeHooks(t *testing.T, listenFn func(network, address string) (net.Listener, error)) (logs *syncBuffer, sigcc chan chan<- os.Signal) {
+	t.Helper()
+	saveLogging(t)
+	savedConf, savedListen, savedNotify := conf, listen, notifySignals
+	t.Cleanup(func() { conf, listen, notifySignals = savedConf, savedListen, savedNotify })
+
+	logs = &syncBuffer{}
+	sigcc = make(chan chan<- os.Signal, 1)
+	slog.SetDefault(slog.New(slog.NewTextHandler(logs, nil)))
+	conf = &config.Config{App: "test", URL: "http://target", Interface: "127.0.0.1", Port: 9707, ScrapeTimeout: time.Minute}
+	listen = listenFn
+	notifySignals = func(c chan<- os.Signal, sig ...os.Signal) {
+		if !slices.Equal(sig, []os.Signal{os.Interrupt, syscall.SIGTERM}) {
+			t.Errorf("notifySignals got %v", sig)
+		}
+		sigcc <- c
+	}
+	return logs, sigcc
+}
+
+func loopbackListen() (func(string, string) (net.Listener, error), chan string) {
+	addrc := make(chan string, 1)
+	return func(network, _ string) (net.Listener, error) {
+		ln, err := net.Listen(network, "127.0.0.1:0")
+		if err == nil {
+			addrc <- ln.Addr().String()
+		}
+		return ln, err
+	}, addrc
+}
+
+func startServeHTTP(ctx context.Context, h http.Handler) chan error {
+	errc := make(chan error, 1)
+	go func() { errc <- serveHTTP(ctx, time.Minute, h) }()
+	return errc
+}
+
+func waitErr(t *testing.T, errc chan error) error {
+	t.Helper()
+	select {
+	case err := <-errc:
+		return err
+	case <-time.After(10 * time.Second):
+		t.Fatal("serveHTTP did not return within 10s")
+		return nil
+	}
+}
+
+func TestServeHTTP_ListenError(t *testing.T) {
+	logs, _ := useServeHooks(t, func(string, string) (net.Listener, error) {
+		return nil, errors.New("address in use")
+	})
+	err := serveHTTP(context.Background(), time.Minute, singleTargetHandler())
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to start HTTP server: address in use")
+	assert.Contains(t, logs.String(), "Starting HTTP Server")
+}
+
+func TestServeHTTP_ClosedListener(t *testing.T) {
+	useServeHooks(t, func(network, _ string) (net.Listener, error) {
+		ln, err := net.Listen(network, "127.0.0.1:0")
+		if err != nil {
+			return nil, err
+		}
+		_ = ln.Close()
+		return ln, nil
+	})
+	err := serveHTTP(context.Background(), time.Minute, singleTargetHandler())
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to start HTTP server")
+}
+
+func TestServeHTTP_ContextCancelled(t *testing.T) {
+	listenFn, addrc := loopbackListen()
+	logs, _ := useServeHooks(t, listenFn)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	errc := startServeHTTP(ctx, singleTargetHandler())
+	addr := <-addrc
+	code, body := get(t, http.MethodGet, "http://"+addr+"/healthz")
+	assert.Equal(t, code, http.StatusOK)
+	assert.Equal(t, body, "OK")
+
+	cancel()
+	assert.NoError(t, waitErr(t, errc))
+	assert.NotContains(t, logs.String(), "Shutting down")
+}
+
+func TestServeHTTP_Signal(t *testing.T) {
+	listenFn, addrc := loopbackListen()
+	logs, sigcc := useServeHooks(t, listenFn)
+
+	errc := startServeHTTP(context.Background(), singleTargetHandler())
+	<-addrc
+	(<-sigcc) <- os.Interrupt
+	assert.NoError(t, waitErr(t, errc))
+	assert.Contains(t, logs.String(), `msg="Shutting down due to signal" signal=interrupt`)
+}
+
+func TestServeHTTP_GracefulShutdownFailure(t *testing.T) {
+	listenFn, addrc := loopbackListen()
+	logs, _ := useServeHooks(t, listenFn)
+	savedTimeout := gracefulTimeout
+	gracefulTimeout = 50 * time.Millisecond
+	t.Cleanup(func() { gracefulTimeout = savedTimeout })
+
+	blocking := newBlockingCollector()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	errc := startServeHTTP(ctx, singleTargetHandler(blocking))
+	addr := <-addrc
+
+	scraped := make(chan int, 1)
+	go func() {
+		resp, err := http.Get("http://" + addr + "/metrics")
+		if err != nil {
+			scraped <- 0
+			return
+		}
+		_, _ = io.Copy(io.Discard, resp.Body)
+		_ = resp.Body.Close()
+		scraped <- resp.StatusCode
+	}()
+	<-blocking.started
+
+	cancel()
+	err := waitErr(t, errc)
+	assert.Error(t, err)
+	assert.True(t, errors.Is(err, context.DeadlineExceeded), "unexpected error %v", err)
+	assert.Contains(t, logs.String(), `msg="Server shutdown failed"`)
+
+	close(blocking.release)
+	assert.Equal(t, <-scraped, http.StatusOK)
+}
+
+// captureSlog swaps slog.Default for a text handler without timestamps.
+func captureSlog(t *testing.T) *syncBuffer {
+	t.Helper()
+	saveLogging(t)
+	buf := &syncBuffer{}
+	slog.SetDefault(slog.New(slog.NewTextHandler(buf, &slog.HandlerOptions{
+		ReplaceAttr: func(groups []string, a slog.Attr) slog.Attr {
+			if len(groups) == 0 && a.Key == slog.TimeKey {
+				return slog.Attr{}
+			}
+			return a
+		},
+	})))
+	return buf
+}
+
+func TestPromhttpLogger_NoTargetIsByteIdentical(t *testing.T) {
+	logs := captureSlog(t)
+	promhttpLogger{}.Println("x")
+	slog.Error("x\n")
+	lines := strings.SplitAfter(logs.String(), "\n")
+	assert.Len(t, lines, 3)
+	assert.Equal(t, lines[0], lines[1])
+	assert.Equal(t, lines[0], "level=ERROR msg=\"x\\n\"\n")
+}
+
+func TestPromhttpLogger_WithTarget(t *testing.T) {
+	logs := captureSlog(t)
+	promhttpLogger{target: "t"}.Println("error gathering metrics:", errors.New("boom"))
+	assert.Equal(t, logs.String(), "level=ERROR msg=\"error gathering metrics: boom\\n\" target=t\n")
+}
+
+// invalidCollector sends a metric that fails the gather.
+type invalidCollector struct{ desc *prometheus.Desc }
+
+func (c invalidCollector) Describe(ch chan<- *prometheus.Desc) { ch <- c.desc }
+
+func (c invalidCollector) Collect(ch chan<- prometheus.Metric) {
+	ch <- prometheus.NewInvalidMetric(c.desc, errors.New("broken metric"))
+}
+
+func TestNewMetricsHandler_GatherErrorLogsTarget(t *testing.T) {
+	for _, target := range []string{"", "sonarr-hd"} {
+		t.Run("target="+target, func(t *testing.T) {
+			logs := captureSlog(t)
+			registry := prometheus.NewRegistry()
+			registry.MustRegister(
+				invalidCollector{desc: prometheus.NewDesc("invalid", "test", nil, nil)},
+				constCollector{desc: prometheus.NewDesc("fine", "test", nil, nil)},
+			)
+			ts := httptest.NewServer(newMetricsHandler(stackOpts{
+				app:           "sonarr",
+				url:           "http://sonarr:8989",
+				target:        target,
+				scrapeTimeout: time.Minute,
+			}, registry))
+			t.Cleanup(ts.Close)
+
+			code, body := get(t, http.MethodGet, ts.URL)
+			assert.Equal(t, code, http.StatusOK)
+			assert.Contains(t, body, "fine ")
+
+			var errorLines int
+			for line := range strings.Lines(logs.String()) {
+				if !strings.HasPrefix(line, "level=ERROR") {
+					continue
+				}
+				errorLines++
+				assert.Contains(t, line, "broken metric")
+				if target == "" {
+					assert.NotContains(t, line, "target=")
+				} else {
+					assert.True(t, strings.HasSuffix(line, " target="+target+"\n"), "line %q lacks target", line)
+				}
+			}
+			assert.Equal(t, errorLines, 1)
+		})
 	}
 }

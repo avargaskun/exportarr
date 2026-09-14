@@ -94,3 +94,45 @@ services:
     ports:
       - "9712:9712"
     restart: unless-stopped
+  # Serve mode: one container exports several targets at /metrics/<name>
+  # (see "Serving several targets from one process" in the README). Use it
+  # instead of one service per app instance: uncomment it together with the
+  # top-level secrets block below. The secret files must be readable by UID
+  # 65532, the container user.
+  # exportarr-serve:
+  #   image: ghcr.io/avargaskun/exportarr:3.1.0 # x-release-please-version
+  #   container_name: exportarr-serve
+  #   command: ["serve"]
+  #   environment:
+  #     PORT: 9713
+  #     TARGET_0_NAME: sonarr-hd
+  #     TARGET_0_APP: sonarr
+  #     TARGET_0_URL: "http://x.x.x.x:8989" # or; http://sonarr-hd:8989
+  #     TARGET_0_API_KEY_FILE: /run/secrets/sonarr_hd_api_key
+  #     TARGET_1_NAME: sonarr-4k
+  #     TARGET_1_APP: sonarr
+  #     TARGET_1_URL: "http://x.x.x.x:8990" # or; http://sonarr-4k:8989
+  #     TARGET_1_API_KEY_FILE: /run/secrets/sonarr_4k_api_key
+  #     TARGET_1_SERIES_CONCURRENCY: 4 # optional per-target override
+  #     TARGET_2_NAME: prowlarr
+  #     TARGET_2_APP: prowlarr
+  #     TARGET_2_URL: "http://x.x.x.x:9696" # or; http://prowlarr:9696
+  #     TARGET_2_API_KEY_FILE: /run/secrets/prowlarr_api_key
+  #     # MAX_UPSTREAM_REQUESTS: 64 # optional; at least the number of targets + 1
+  #   secrets:
+  #     - sonarr_hd_api_key
+  #     - sonarr_4k_api_key
+  #     - prowlarr_api_key
+  #   #    networks:
+  #   #     - your_custom_network # optional
+  #   ports:
+  #     - "9713:9713"
+  #   restart: unless-stopped
+
+# secrets:
+#   sonarr_hd_api_key:
+#     file: ./sonarr_hd_api_key.txt
+#   sonarr_4k_api_key:
+#     file: ./sonarr_4k_api_key.txt
+#   prowlarr_api_key:
+#     file: ./prowlarr_api_key.txt

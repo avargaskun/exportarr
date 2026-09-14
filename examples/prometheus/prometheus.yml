@@ -25,3 +25,25 @@ scrape_configs:
   - job_name: "lidarr-exporter"  # Renamed job_name for clarity
     static_configs:
       - targets: ["lidarr-exporter:9711"]  # Use service name and port
+
+  # Serve mode (the commented exportarr-serve service in examples/compose):
+  # one entry per target, selected by __metrics_path__ and named by instance.
+  - job_name: "exportarr-serve"
+    static_configs:
+      - targets: ["exportarr-serve:9713"]
+        labels:
+          __metrics_path__: /metrics/sonarr-hd
+          instance: sonarr-hd
+      - targets: ["exportarr-serve:9713"]
+        labels:
+          __metrics_path__: /metrics/sonarr-4k
+          instance: sonarr-4k
+      - targets: ["exportarr-serve:9713"]
+        labels:
+          __metrics_path__: /metrics/prowlarr
+          instance: prowlarr
+
+  # The serve exporter's own metrics (runtime and upstream-limit metrics).
+  - job_name: "exportarr-serve-self"
+    static_configs:
+      - targets: ["exportarr-serve:9713"]

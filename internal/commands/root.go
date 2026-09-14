@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -25,9 +26,13 @@ import (
 	"github.com/onedr0p/exportarr/internal/handlers"
 )
 
-const gracefulTimeout = 5 * time.Second
-
 var (
+	gracefulTimeout = 5 * time.Second
+
+	listen                  = net.Listen
+	logOutput     io.Writer = os.Stdout
+	notifySignals           = signal.Notify
+
 	conf    = &config.Config{}
 	appInfo = &AppInfo{}
 	rootCmd = &cobra.Command{
@@ -88,9 +93,9 @@ func initLogger() {
 	// lower/raise the level once the configured value parses.
 	lvl := new(slog.LevelVar)
 
-	var handler slog.Handler = slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: lvl})
+	var handler slog.Handler = slog.NewTextHandler(logOutput, &slog.HandlerOptions{Level: lvl})
 	if conf.LogFormat == "json" {
-		handler = slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: lvl})
+		handler = slog.NewJSONHandler(logOutput, &slog.HandlerOptions{Level: lvl})
 	}
 	slog.SetDefault(slog.New(handler))
 
@@ -123,68 +128,64 @@ func warnSecretFlags(log *slog.Logger, flags *pflag.FlagSet) {
 }
 
 // promhttpLogger routes promhttp's internal gather errors to slog.
-type promhttpLogger struct{}
-
-// Println implements promhttp.Logger.
-func (promhttpLogger) Println(v ...any) {
-	slog.Error(fmt.Sprintln(v...))
+type promhttpLogger struct {
+	target string
 }
 
-type registerFunc func(registry prometheus.Registerer)
+// Println implements promhttp.Logger.
+func (p promhttpLogger) Println(v ...any) {
+	if p.target == "" {
+		slog.Error(fmt.Sprintln(v...))
+		return
+	}
+	slog.Error(fmt.Sprintln(v...), "target", p.target)
+}
 
 // newServer bounds every phase of a connection so a stalled or slow client
 // cannot pin it open. Writes get the scrape budget plus a margin, so a scrape
 // that times out can still deliver its 503.
-func newServer(conf *config.Config) *http.Server {
+var newServer = func(scrapeTimeout time.Duration) *http.Server {
 	return &http.Server{
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,
-		WriteTimeout:      conf.ScrapeTimeout + 10*time.Second,
+		WriteTimeout:      scrapeTimeout + 10*time.Second,
 		IdleTimeout:       60 * time.Second,
 	}
 }
 
-func serveHTTP(fn registerFunc) error {
-	srv := newServer(conf)
+func serveHTTP(ctx context.Context, scrapeTimeout time.Duration, h http.Handler) error {
+	sigc := make(chan os.Signal, 1)
+	notifySignals(sigc, os.Interrupt, syscall.SIGTERM)
+	defer signal.Stop(sigc)
 
-	idleConnsClosed := make(chan struct{})
-	go func() {
-		sigchan := make(chan os.Signal, 1)
-		signal.Notify(sigchan, os.Interrupt)
-		signal.Notify(sigchan, syscall.SIGTERM)
-		sig := <-sigchan
-		slog.Info("Shutting down due to signal", "signal", sig.String())
-
-		ctx, cancel := context.WithTimeout(context.Background(), gracefulTimeout)
-		defer cancel()
-
-		if err := srv.Shutdown(ctx); err != nil {
-			slog.Error("Server shutdown failed", "error", err)
-			os.Exit(1)
-		}
-		close(idleConnsClosed)
-	}()
-
-	registry := prometheus.NewRegistry()
-	registerAppInfoMetric(registry)
-	// The exporter's own runtime health: go_* and process_* metrics make its
-	// CPU, memory, and GC behavior visible to the operator.
-	registry.MustRegister(
-		collectors.NewGoCollector(),
-		collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}),
-	)
-	fn(registry)
+	srv := newServer(scrapeTimeout)
 
 	slog.Info("Starting HTTP Server",
 		"interface", conf.Interface,
 		"port", conf.Port)
-	srv.Addr = listenAddr(conf)
-	srv.Handler = newHandler(conf, registry)
+	srv.Handler = h
 
-	if err := srv.ListenAndServe(); err != http.ErrServerClosed {
+	ln, err := listen("tcp", listenAddr(conf))
+	if err != nil {
 		return fmt.Errorf("failed to start HTTP server: %w", err)
 	}
-	<-idleConnsClosed
+	errc := make(chan error, 1)
+	go func() { errc <- srv.Serve(ln) }()
+
+	select {
+	case err := <-errc:
+		return fmt.Errorf("failed to start HTTP server: %w", err)
+	case sig := <-sigc:
+		slog.Info("Shutting down due to signal", "signal", sig.String())
+	case <-ctx.Done():
+	}
+
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), gracefulTimeout)
+	defer cancel()
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		slog.Error("Server shutdown failed", "error", err)
+		return err
+	}
 	return nil
 }
 
@@ -213,25 +214,57 @@ func (g *sharedGatherer) Gather() ([]*dto.MetricFamily, error) {
 // get a 503 instead of stacking more authenticated walks onto the target.
 const maxScrapesInFlight = 2
 
-func newHandler(conf *config.Config, registry *prometheus.Registry) http.Handler {
+// stackOpts describes one scrape target's /metrics stack.
+type stackOpts struct {
+	app, url, target string
+	scrapeTimeout    time.Duration
+}
+
+func newMetricsHandler(o stackOpts, registry *prometheus.Registry) http.Handler {
 	// Serve partial metrics when a collector fails rather than failing the
 	// whole scrape. Collectors report failures via *_collector_error gauges,
-	// except system status, which reports <app>_system_status 0. Scrape
-	// bookkeeping wraps only /metrics so health probes don't pollute it.
-	metricsHandler := promhttp.HandlerFor(&sharedGatherer{inner: registry}, promhttp.HandlerOpts{
+	// except system status, which reports <app>_system_status 0.
+	h := promhttp.HandlerFor(&sharedGatherer{inner: registry}, promhttp.HandlerOpts{
 		ErrorHandling:       promhttp.ContinueOnError,
-		ErrorLog:            promhttpLogger{},
+		ErrorLog:            promhttpLogger{target: o.target},
 		MaxRequestsInFlight: maxScrapesInFlight,
-		Timeout:             conf.ScrapeTimeout,
+		Timeout:             o.scrapeTimeout,
 		// Exposes promhttp_metric_handler_errors_total for gather errors.
 		Registry: registry,
 	})
+	return handlers.MetricsHandler(o.app, o.url, registry, h)
+}
+
+func newHandler(conf *config.Config, registry *prometheus.Registry) http.Handler {
+	// Scrape bookkeeping wraps only /metrics so health probes don't pollute it.
 	mux := http.NewServeMux()
-	mux.Handle("GET /metrics", handlers.MetricsHandler(conf, registry, metricsHandler))
+	mux.Handle("GET /metrics", newMetricsHandler(stackOpts{
+		app:           conf.App,
+		url:           conf.URL,
+		scrapeTimeout: conf.ScrapeTimeout,
+	}, registry))
 	mux.HandleFunc("GET /healthz", handlers.HealthzHandler)
 	mux.HandleFunc("GET /", handlers.IndexHandler)
 
 	return handlers.LogHandler(handlers.RecoveryHandler(mux))
+}
+
+// newSelfRegistry holds the exporter's own health: app info, go_* and process_*.
+func newSelfRegistry() *prometheus.Registry {
+	registry := prometheus.NewRegistry()
+	registerAppInfoMetric(registry)
+	registry.MustRegister(
+		collectors.NewGoCollector(),
+		collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}),
+	)
+	return registry
+}
+
+// singleTargetHandler serves the self metrics and cs from one registry.
+func singleTargetHandler(cs ...prometheus.Collector) http.Handler {
+	registry := newSelfRegistry()
+	registry.MustRegister(cs...)
+	return newHandler(conf, registry)
 }
 
 func registerAppInfoMetric(registry prometheus.Registerer) {
