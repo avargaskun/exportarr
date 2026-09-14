@@ -43,11 +43,14 @@ func TestCountingLimiter_BoundedWaitsAndCancels(t *testing.T) {
 	assert.Contains(t, err.Error(), "waiting for an upstream request slot")
 	assert.Equal(t, l.Acquires(), int64(1))
 
-	got := make(chan func(), 1)
+	type result struct {
+		release func()
+		err     error
+	}
+	got := make(chan result, 1)
 	go func() {
 		r, err := l.Acquire(context.Background())
-		assert.NoError(t, err)
-		got <- r
+		got <- result{r, err}
 	}()
 	select {
 	case <-got:
@@ -56,8 +59,9 @@ func TestCountingLimiter_BoundedWaitsAndCancels(t *testing.T) {
 	}
 	release()
 	select {
-	case r := <-got:
-		r()
+	case res := <-got:
+		assert.NoError(t, res.err)
+		res.release()
 	case <-time.After(5 * time.Second):
 		t.Fatal("second acquire never got the released slot")
 	}

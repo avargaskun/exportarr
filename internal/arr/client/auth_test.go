@@ -307,3 +307,55 @@ func TestFormAuth_SingleSlotDoesNotDeadlock(t *testing.T) {
 	assert.Equal(t, lim.Outstanding(), int64(0))
 	assert.Equal(t, fake.PeakInFlight(), int64(1))
 }
+
+func TestFormAuth_FailedLoginReleasesSlot(t *testing.T) {
+	loginServer := func(t *testing.T, h http.HandlerFunc) string {
+		ts := httptest.NewServer(h)
+		t.Cleanup(ts.Close)
+		return ts.URL
+	}
+	for _, tc := range []struct {
+		name     string
+		upstream func(t *testing.T) string
+		wantErr  string
+	}{
+		{"wrong password", func(t *testing.T) string {
+			return fixtures.NewFakeApp(t, fixtures.FakeAppOptions{App: "radarr", APIKey: fixtures.APIKey, FormAuth: formAuthCreds}).URL
+		}, "Login Failed"},
+		{"non-302 login response", func(t *testing.T) string {
+			return loginServer(t, func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(http.StatusInternalServerError)
+				_, _ = w.Write([]byte("boom"))
+			})
+		}, "Received Status Code 500"},
+		{"302 without an arrAuth cookie", func(t *testing.T) string {
+			return loginServer(t, func(w http.ResponseWriter, _ *http.Request) {
+				http.SetCookie(w, &http.Cookie{Name: "unrelated", Value: "x", Secure: true, HttpOnly: true, SameSite: http.SameSiteStrictMode})
+				w.Header().Set("Location", "/")
+				w.WriteHeader(http.StatusFound)
+			})
+		}, "No Cookie with suffix 'arrAuth' found"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			lim := fixtures.NewCountingLimiter(1)
+			c, err := NewClient(&config.ArrConfig{
+				App: "radarr", APIVersion: "v3", URL: tc.upstream(t), APIKey: fixtures.APIKey,
+				FormAuth: true, AuthUsername: formAuthCreds.Username, AuthPassword: "not-" + formAuthCreds.Password,
+				RequestTimeout: 10 * time.Second, UpstreamLimiter: lim,
+			})
+			assert.NoError(t, err)
+
+			_, err = Get[map[string]any](c, "system/status")
+			assert.Error(t, err)
+			assert.Contains(t, err.Error(), tc.wantErr)
+			assert.Equal(t, lim.Acquires(), int64(1), "only the login must take a slot")
+			assert.Equal(t, lim.Outstanding(), int64(0))
+
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+			defer cancel()
+			release, err := lim.Acquire(ctx)
+			assert.NoError(t, err, "the failed login's slot was never released")
+			release()
+		})
+	}
+}

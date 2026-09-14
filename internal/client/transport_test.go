@@ -290,3 +290,38 @@ func TestLimitedTransport_CancelWhileWaitingForSlot(t *testing.T) {
 	assert.Equal(t, hits.Load(), int64(0))
 	assert.Equal(t, lim.acquires.Load(), int64(1))
 }
+
+func TestLimitedTransport_ReleasesOnErrorStatus(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		code     int
+		location string
+		wantErr  string
+	}{
+		{"redirect", http.StatusFound, "/elsewhere", "received Redirect Status Code: 302"},
+		{"client error", http.StatusNotFound, "", "received Client Error Status Code: 404"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				if tc.location != "" {
+					w.Header().Set("Location", tc.location)
+				}
+				w.WriteHeader(tc.code)
+				_, _ = io.WriteString(w, "body")
+			}))
+			defer ts.Close()
+
+			lim := newCountingLimiter(1)
+			c, err := NewClient(ts.URL, TransportOptions{Limiter: lim}, 0, nil)
+			assert.NoError(t, err)
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			err = c.DoRequestContext(ctx, "api", nil)
+			assert.Error(t, err)
+			assert.Contains(t, err.Error(), tc.wantErr)
+			assert.Equal(t, lim.acquires.Load(), int64(1))
+			assert.Equal(t, lim.releases.Load(), lim.acquires.Load())
+			assert.Equal(t, lim.outstanding.Load(), int64(0))
+		})
+	}
+}

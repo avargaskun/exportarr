@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -308,17 +309,65 @@ func TestServeE2E_HungTarget(t *testing.T) {
 				t.Fatal("the hung scrape never returned")
 			}
 			assert.True(t, h.dur < 2500*time.Millisecond, "the hung scrape took %s", h.dur)
-			if h.code == http.StatusOK {
-				v, ok := metricValue(h.body, `sonarr_collector_error{url="`+hung.URL+`"}`)
-				assert.True(t, ok && v == 1, "the hung target has no error gauge:\n%s", h.body)
-			} else {
-				assert.Equal(t, h.code, http.StatusServiceUnavailable)
-			}
+			assert.Equal(t, h.code, http.StatusOK)
+			v, ok := metricValue(h.body, `sonarr_collector_error{url="`+hung.URL+`"}`)
+			assert.True(t, ok && v == 1, "the hung target has no error gauge:\n%s", h.body)
 
 			assertE2EInvariants(t, rc, fakes)
 			rc.Stop()
 		})
 	}
+}
+
+func TestServeE2E_HungTargetCannotStarveOthers(t *testing.T) {
+	release := make(chan struct{})
+	var once sync.Once
+	unblock := func() { once.Do(func() { close(release) }) }
+	ts := []e2eTarget{
+		{name: "sonarr-hung", app: "sonarr", extra: map[string]string{"SCRAPE_TIMEOUT": "30s"}, opts: fixtures.FakeAppOptions{
+			Behavior: func(r *http.Request) fixtures.Action {
+				select {
+				case <-release:
+				case <-r.Context().Done():
+				}
+				return fixtures.Serve()
+			},
+		}},
+		{name: "radarr", app: "radarr"},
+		{name: "sabnzbd", app: "sabnzbd"},
+	}
+	// A cap of N+1 leaves one shared slot; healthy targets get a 5s collect deadline.
+	rc, fakes := startServe(t, ts, map[string]string{"MAX_UPSTREAM_REQUESTS": strconv.Itoa(len(ts) + 1), "SCRAPE_TIMEOUT": "10s"})
+	// Registered after startServe so it runs before the fakes close.
+	t.Cleanup(unblock)
+	hung := fakes["sonarr-hung"]
+
+	hungDone := make(chan scrapeResult, 1)
+	go func() {
+		code, body := rc.Get("/metrics/sonarr-hung")
+		hungDone <- scrapeResult{code: code, body: body}
+	}()
+	waitUntil(t, 5*time.Second, func() bool { return hung.InFlight() >= 2 }, "the hung target never held its reserved and the shared slot")
+
+	res := scrapeConcurrently(rc, metricsPaths(ts[1:])...)
+	for _, tg := range ts[1:] {
+		r := res["/metrics/"+tg.name]
+		assertHealthyScrape(t, tg, fakes[tg.name], r)
+		assert.True(t, r.dur < 3*time.Second, "%s took %s while its neighbor held the shared slot", tg.name, r.dur)
+	}
+	assert.Equal(t, hung.PeakInFlight(), int64(2), "the hung target's peak in-flight requests")
+
+	unblock()
+	var h scrapeResult
+	select {
+	case h = <-hungDone:
+	case <-time.After(harnessTimeout):
+		t.Fatal("the hung scrape never returned after it was unblocked")
+	}
+	assertHealthyScrape(t, ts[0], hung, h)
+
+	assertE2EInvariants(t, rc, fakes)
+	rc.Stop()
 }
 
 func TestServeE2E_FailingTarget(t *testing.T) {
@@ -426,13 +475,10 @@ func TestServeE2E_PerTargetScrapeTimeout(t *testing.T) {
 
 	res := scrapeConcurrently(rc, metricsPaths(ts)...)
 	slow := res["/metrics/slow"]
-	assert.True(t, slow.dur < 3500*time.Millisecond, "the slow target took %s", slow.dur)
-	if slow.code == http.StatusOK {
-		v, ok := metricValue(slow.body, `sonarr_collector_error{url="`+fakes["slow"].URL+`"}`)
-		assert.True(t, ok && v == 1, "the slow target's partial result has no error gauge:\n%s", slow.body)
-	} else {
-		assert.Equal(t, slow.code, http.StatusServiceUnavailable)
-	}
+	assert.True(t, slow.dur < 2500*time.Millisecond, "the slow target took %s", slow.dur)
+	assert.Equal(t, slow.code, http.StatusOK)
+	v, ok := metricValue(slow.body, `sonarr_collector_error{url="`+fakes["slow"].URL+`"}`)
+	assert.True(t, ok && v == 1, "the slow target's partial result has no error gauge:\n%s", slow.body)
 	fast := res["/metrics/fast"]
 	assertHealthyScrape(t, ts[1], fakes["fast"], fast)
 	assert.True(t, fast.dur < 2*time.Second, "the fast target took %s", fast.dur)
@@ -473,10 +519,26 @@ func waitUntil(t *testing.T, timeout time.Duration, cond func() bool, msg string
 func TestServeE2E_GlobalCap(t *testing.T) {
 	const capacity = 10
 	tracker := &fixtures.ConcurrencyTracker{}
+	var delaying, peak atomic.Int64
 	ts := everyAppTargets()[1:]
 	for i := range ts {
 		ts[i].opts.Tracker = tracker
-		ts[i].opts.Behavior = func(*http.Request) fixtures.Action { return fixtures.Delay(50 * time.Millisecond) }
+		ts[i].opts.Behavior = func(r *http.Request) fixtures.Action {
+			n := delaying.Add(1)
+			defer delaying.Add(-1)
+			for p := peak.Load(); n > p; p = peak.Load() {
+				if peak.CompareAndSwap(p, n) {
+					break
+				}
+			}
+			timer := time.NewTimer(50 * time.Millisecond)
+			defer timer.Stop()
+			select {
+			case <-timer.C:
+			case <-r.Context().Done():
+			}
+			return fixtures.Serve()
+		}
 	}
 	rc, fakes := startServe(t, ts, map[string]string{"MAX_UPSTREAM_REQUESTS": strconv.Itoa(capacity)})
 
@@ -484,7 +546,7 @@ func TestServeE2E_GlobalCap(t *testing.T) {
 	for _, tg := range ts {
 		assertHealthyScrape(t, tg, fakes[tg.name], res["/metrics/"+tg.name])
 	}
-	assert.True(t, tracker.Peak() <= capacity, "%d upstream requests in flight at once, cap %d", tracker.Peak(), capacity)
+	assert.True(t, peak.Load() <= capacity, "%d upstream requests in flight at once, cap %d", peak.Load(), capacity)
 	assert.True(t, tracker.Peak() > 1, "the scrapes never overlapped upstream")
 
 	assertNoSlotLeak(t, rc, slices.Sorted(maps.Keys(fakes))...)
@@ -647,6 +709,7 @@ func TestServeE2E_Secrets(t *testing.T) {
 		fileKey      = "Secretkeyfile1111111111111111111"
 		formUser     = "e2e-formuser"
 		formPassword = "hunter2-formpw"
+		badPassword  = "hunter3-wrongpw"
 		fakeOnlyKey  = "Fakeonlykey222222222222222222222"
 	)
 	keyFile := filepath.Join(t.TempDir(), "radarr.key")
@@ -660,12 +723,16 @@ func TestServeE2E_Secrets(t *testing.T) {
 			opts:  fixtures.FakeAppOptions{FormAuth: &fixtures.FormAuthCreds{Username: formUser, Password: formPassword}},
 			extra: map[string]string{"FORM_AUTH": "true", "AUTH_USERNAME": formUser, "AUTH_PASSWORD": formPassword},
 		},
+		{name: "radarr-badlogin", app: "radarr",
+			opts:  fixtures.FakeAppOptions{FormAuth: &fixtures.FormAuthCreds{Username: formUser, Password: formPassword}},
+			extra: map[string]string{"FORM_AUTH": "true", "AUTH_USERNAME": formUser, "AUTH_PASSWORD": badPassword},
+		},
 		{name: "lidarr-failing", app: "lidarr", opts: fixtures.FakeAppOptions{Behavior: status500}},
 		{name: "sabnzbd-badauth", app: "sabnzbd", opts: fixtures.FakeAppOptions{APIKey: fakeOnlyKey}},
 		{name: "sabnzbd", app: "sabnzbd"},
 	}
 	rc, fakes := startServe(t, ts, map[string]string{"LOG_LEVEL": "debug", "TARGET_0_API_KEY": inlineKey})
-	secrets := []string{inlineKey, fileKey, formUser, formPassword, fakeOnlyKey}
+	secrets := []string{inlineKey, fileKey, formUser, formPassword, badPassword, fakeOnlyKey}
 	for i := 2; i < len(ts); i++ {
 		secrets = append(secrets, e2eKey(i))
 	}
@@ -685,7 +752,7 @@ func TestServeE2E_Secrets(t *testing.T) {
 			r := res["/metrics/"+tg.name]
 			bodies[fmt.Sprintf("scrape %d of %s", scrape, tg.name)] = r.body
 			switch tg.name {
-			case "lidarr-failing", "sabnzbd-badauth":
+			case "radarr-badlogin", "lidarr-failing", "sabnzbd-badauth":
 				assert.Equal(t, r.code, http.StatusOK, tg.name)
 				v, ok := metricValue(r.body, tg.app+`_collector_error{url="`+fakes[tg.name].URL+`"}`)
 				assert.True(t, ok && v == 1, "%s has no error gauge:\n%s", tg.name, r.body)
@@ -699,6 +766,11 @@ func TestServeE2E_Secrets(t *testing.T) {
 	}
 	assert.Equal(t, bodies["/metrics/nope"], notFoundBody)
 	assert.Equal(t, bodies["/nope"], notFoundBody)
+	badLogin := fakes["radarr-badlogin"]
+	assert.Equal(t, badLogin.Logins(), 0)
+	assert.True(t, slices.ContainsFunc(badLogin.Requests(), func(r fixtures.Recorded) bool {
+		return r.Method == http.MethodPost && r.Path == "/login"
+	}), "radarr-badlogin never attempted a login")
 
 	assertE2EInvariants(t, rc, fakes)
 	rc.Stop()
