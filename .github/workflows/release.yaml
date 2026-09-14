@@ -27,20 +27,41 @@ jobs:
     name: Release Please
     if: github.event_name == 'push'
     runs-on: ubuntu-24.04
-    permissions:
-      contents: write # tags, releases, changelog commits
-      pull-requests: write # release PRs and their labels
+    permissions: {}
     outputs:
       release_created: ${{ steps.release.outputs.release_created }}
       tag_name: ${{ steps.release.outputs.tag_name }}
     steps:
+      # Unlike GITHUB_TOKEN, an app token lets the release PR run CI and its merge trigger this workflow.
+      - name: Create app token
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ vars.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          permission-contents: write # tags, releases, changelog commits
+          permission-pull-requests: write # release PRs, their labels, auto-merge
+
       - name: Release Please
         id: release
         uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
         with:
+          token: ${{ steps.app-token.outputs.token }}
           target-branch: dev
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
+
+      - name: Auto-merge the release PR
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          pr=$(gh pr list --base dev --state open --label "autorelease: pending" --json number --jq '.[0].number // empty')
+          if [[ -z "$pr" ]]; then
+            echo "No open release PR"
+            exit 0
+          fi
+          gh pr merge "$pr" --auto --squash
 
   # Tags pushed with GITHUB_TOKEN don't trigger workflows, so publishing is
   # chained here rather than in a tag-triggered workflow.
