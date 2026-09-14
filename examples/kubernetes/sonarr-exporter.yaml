@@ -65,7 +65,7 @@ spec:
     spec:
       containers:
         - name: sonarr-exporter
-          image: ghcr.io/avargaskun/exportarr:3.1.0 # x-release-please-version
+          image: ghcr.io/avargaskun/exportarr:3.2.0 # x-release-please-version
           imagePullPolicy: IfNotPresent
           args:
             - sonarr

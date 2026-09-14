@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.2.0](https://github.com/avargaskun/exportarr/compare/v3.1.0...v3.2.0) (2026-09-14)
+
+
+### Features
+
+* serve several named targets from one process ([#14](https://github.com/avargaskun/exportarr/issues/14)) ([028d5ad](https://github.com/avargaskun/exportarr/commit/028d5ad80415b350674befd8fe1c752d34dc8190))
+
 ## [3.1.0](https://github.com/avargaskun/exportarr/compare/52bb6eb...v3.1.0) (2026-09-13)
 
 
