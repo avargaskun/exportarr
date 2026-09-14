@@ -47,7 +47,7 @@ docker run --name exportarr_$app \
   -v "$PWD/api_key:/run/secrets/api_key:ro" \
   --restart unless-stopped \
   -p 9707:9707 \
-  -d ghcr.io/avargaskun/exportarr:3.1.0 $app
+  -d ghcr.io/avargaskun/exportarr:3.2.0 $app
 ```
 
 <!-- x-release-please-end -->
